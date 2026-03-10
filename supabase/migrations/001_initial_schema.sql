@@ -3,7 +3,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE profiles (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   username TEXT NOT NULL UNIQUE,
-  avatar_url TEXT
+  bio TEXT
 );
 
 CREATE TABLE persona_stats (
@@ -17,15 +17,15 @@ CREATE TABLE persona_stats (
 CREATE TABLE interests (
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   platform TEXT NOT NULL,
-  reference_id TEXT NOT NULL,
+  ref_id TEXT NOT NULL,
   weight INT NOT NULL DEFAULT 1,
-  PRIMARY KEY (user_id, platform, reference_id)
+  PRIMARY KEY (user_id, platform, ref_id)
 );
 
 CREATE TABLE baf_history (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  suggestion_text TEXT NOT NULL,
+  suggestion TEXT NOT NULL,
   outcome TEXT NOT NULL CHECK (outcome IN ('accepted', 'rejected')),
   reason TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
