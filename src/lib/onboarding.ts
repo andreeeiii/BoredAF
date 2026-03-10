@@ -1,6 +1,7 @@
 import { ChatAnthropic } from "@langchain/anthropic";
 import { z } from "zod";
 import { supabase } from "./supabase";
+import { mapToArchetype } from "./mood";
 
 export const PersonaMappingSchema = z.object({
   archetype: z.string(),
@@ -49,11 +50,9 @@ export async function parsePersona(
   const prompt = `Given these 4 user answers from an anti-boredom app onboarding, do the following:
 
 1. Categorize the user into a primary archetype. Pick ONE:
-   - "The Grinder" (competitive, skill-focused)
-   - "The Lurker" (passive consumer, watches/reads)
-   - "The Creator" (makes things, builds, writes)
-   - "The Explorer" (tries new things, curious)
-   - "The Social" (people-oriented, community)
+   - "The Grind" (competitive, skill-focused, mastery-driven)
+   - "The Chill" (passive consumer, relaxation, watches/reads)
+   - "The Spark" (novelty seeker, curious, tries new things)
 
 2. Extract 3-6 interest tags (lowercase, short).
 
@@ -65,7 +64,7 @@ USER ANSWERS:
 ${formattedAnswers}
 
 Respond in EXACTLY this JSON format, nothing else:
-{"archetype": "The X", "tags": ["tag1", "tag2"], "personaData": {"energy": "high|low|mixed", "focus": "logic|visual|physical|creative|social"}, "extractedInterests": [{"platform": "youtube|twitch|reddit|game|other", "ref_id": "handle_or_name", "weight": 8}]}`;
+{"archetype": "The Grind|The Chill|The Spark", "tags": ["tag1", "tag2"], "personaData": {"energy": "high|low|mixed", "focus": "logic|visual|physical|creative|social"}, "extractedInterests": [{"platform": "youtube|twitch|reddit|game|other", "ref_id": "handle_or_name", "weight": 8}]}`;
 
   try {
     const response = await llm.invoke(prompt);
@@ -104,12 +103,19 @@ export async function saveOnboardingResult(
   userId: string,
   mapping: PersonaMapping
 ): Promise<void> {
+  const coreArchetype = mapToArchetype(mapping.archetype);
+
+  await supabase
+    .from("profiles")
+    .update({ archetype: coreArchetype })
+    .eq("id", userId);
+
   await supabase.from("persona_stats").upsert(
     {
       user_id: userId,
       category: "archetype",
       value: {
-        name: mapping.archetype,
+        name: coreArchetype,
         tags: mapping.tags,
       },
       last_updated: new Date().toISOString(),

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { runBafBrain } from "@/lib/agent/bafBrain";
-import { updatePersona } from "@/lib/persona";
+import { updatePersona, logNegativeSignal } from "@/lib/persona";
 
 const DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000000";
 
@@ -8,22 +8,25 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const action = body.action as string;
+    const userId = (body.userId as string) ?? DEFAULT_USER_ID;
 
     if (action === "baf") {
-      const userId = (body.userId as string) ?? DEFAULT_USER_ID;
       const rescue = await runBafBrain(userId);
       return NextResponse.json(rescue);
     }
 
     if (action === "feedback") {
-      const userId = (body.userId as string) ?? DEFAULT_USER_ID;
-      const { suggestion, outcome, reason } = body;
+      const { suggestion, outcome, reason, source } = body;
 
       await updatePersona(userId, {
         suggestion,
         outcome,
         reason,
       });
+
+      if (outcome === "rejected" && reason && source) {
+        await logNegativeSignal(userId, source, reason);
+      }
 
       return NextResponse.json({ success: true });
     }

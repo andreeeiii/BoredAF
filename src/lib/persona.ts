@@ -5,6 +5,7 @@ export interface Persona {
     id: string;
     username: string;
     bio: string | null;
+    archetype: string;
   };
   stats: Record<string, Record<string, unknown>>;
   interests: Array<{
@@ -139,4 +140,32 @@ export async function updatePersona(
       }
     }
   }
+}
+
+export async function logNegativeSignal(
+  userId: string,
+  category: string,
+  reason: string
+): Promise<void> {
+  const { data: existing } = await supabase
+    .from("persona_stats")
+    .select("value")
+    .eq("user_id", userId)
+    .eq("category", category)
+    .single();
+
+  const currentValue = (existing?.value as Record<string, unknown>) ?? {};
+  const signals = (currentValue.negative_signals as string[]) ?? [];
+  signals.push(`${reason}|${new Date().toISOString()}`);
+  const recentSignals = signals.slice(-10);
+
+  await supabase.from("persona_stats").upsert(
+    {
+      user_id: userId,
+      category,
+      value: { ...currentValue, negative_signals: recentSignals },
+      last_updated: new Date().toISOString(),
+    },
+    { onConflict: "user_id,category" }
+  );
 }

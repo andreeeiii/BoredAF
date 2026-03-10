@@ -1,11 +1,13 @@
-INSERT INTO public.profiles (id, username)
-VALUES ('00000000-0000-0000-0000-000000000000', 'BoredUser')
-ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.profiles (id, username, archetype)
+VALUES ('00000000-0000-0000-0000-000000000000', 'BoredUser', 'The Grind')
+ON CONFLICT (id) DO UPDATE SET archetype = 'The Grind';
 
 INSERT INTO public.persona_stats (user_id, category, value)
 VALUES
-  ('00000000-0000-0000-0000-000000000000', 'chess', '{"elo": 420, "pref": "blitz"}'),
-  ('00000000-0000-0000-0000-000000000000', 'energy_level', '{"current": "high"}')
+  ('00000000-0000-0000-0000-000000000000', 'chess', '{"elo": 420, "pref": "blitz", "username": "boreduser420"}'),
+  ('00000000-0000-0000-0000-000000000000', 'energy_level', '{"current": "high"}'),
+  ('00000000-0000-0000-0000-000000000000', 'archetype', '{"name": "The Grind", "tags": ["chess", "competitive", "logic"]}'),
+  ('00000000-0000-0000-0000-000000000000', 'onboarding_complete', '{"completed": true, "completedAt": "2025-01-01T00:00:00Z"}')
 ON CONFLICT (user_id, category) DO NOTHING;
 
 INSERT INTO public.interests (user_id, platform, ref_id, weight)

@@ -61,6 +61,7 @@ export default function BafButton() {
         action: "feedback",
         suggestion: rescue.suggestion,
         outcome: "accepted",
+        source: rescue.source,
       }),
     });
 
@@ -83,6 +84,7 @@ export default function BafButton() {
         suggestion: rescue.suggestion,
         outcome: "rejected",
         reason,
+        source: rescue.source,
       }),
     });
 

@@ -9,6 +9,11 @@ import {
   type YouTubeResult,
   type ChessResult,
 } from "../tools/registry";
+import {
+  getCurrentMood,
+  getArchetypeStrategy,
+  type MoodState,
+} from "../mood";
 
 export const RescueSchema = z.object({
   suggestion: z.string(),
@@ -23,11 +28,13 @@ export type Rescue = z.infer<typeof RescueSchema>;
 const BafState = Annotation.Root({
   userId: Annotation<string>,
   userPersona: Annotation<Persona | null>,
+  mood: Annotation<MoodState | null>,
   toolResults: Annotation<{
     youtube: YouTubeResult | null;
     chess: ChessResult | null;
   } | null>,
   previousSuggestions: Annotation<string[]>,
+  recentPlatforms: Annotation<string[]>,
   finalRescue: Annotation<Rescue | null>,
   error: Annotation<string | null>,
 });
@@ -42,11 +49,30 @@ async function contextNode(
 
     const previousSuggestions = persona.recentHistory.map((h) => h.suggestion);
 
-    return { userPersona: persona, previousSuggestions, error: null };
+    const recentPlatforms = persona.recentHistory
+      .slice(0, 3)
+      .map((h) => {
+        if (h.suggestion.toLowerCase().includes("youtube") || h.suggestion.toLowerCase().includes("watch")) return "youtube";
+        if (h.suggestion.toLowerCase().includes("chess") || h.suggestion.toLowerCase().includes("puzzle")) return "chess";
+        return "custom";
+      });
+
+    const energyLevel =
+      (persona.stats.energy_level as { current?: string })?.current ?? "mixed";
+
+    const mood = getCurrentMood(
+      persona.profile.archetype ?? "The Spark",
+      energyLevel,
+      persona.recentHistory
+    );
+
+    return { userPersona: persona, previousSuggestions, recentPlatforms, mood, error: null };
   } catch (err) {
     return {
       userPersona: null,
+      mood: null,
       previousSuggestions: [],
+      recentPlatforms: [],
       error: err instanceof Error ? err.message : "Context fetch failed",
     };
   }
@@ -107,10 +133,14 @@ async function reasoningNode(
     };
   }
 
+  const mood = state.mood!;
+  const archetype = mood.effectiveArchetype;
+  const strategy = getArchetypeStrategy(archetype);
+
   const llm = new ChatAnthropic({
     model: "claude-sonnet-4-20250514",
     temperature: 0.95,
-    maxTokens: 300,
+    maxTokens: 400,
     apiKey,
   });
 
@@ -124,15 +154,12 @@ async function reasoningNode(
     .map((h) => `"${h.suggestion}"`)
     .join("\n- ");
 
-  const recentTwoRejected =
-    state.userPersona.recentHistory.slice(0, 2).every((h) => h.outcome === "rejected");
-
   const videoList =
     state.toolResults?.youtube?.videos
       .slice(0, 5)
       .map(
         (v) =>
-          `"${v.title}" by ${v.channelTitle} (${v.url}) [thumbnail: ${v.thumbnail}]`
+          `"${v.title}" by ${v.channelTitle} — ${v.url}`
       )
       .join("\n") || "No recent videos (last 24h)";
 
@@ -145,10 +172,6 @@ async function reasoningNode(
     ? `Daily Puzzle: "${state.toolResults.chess.dailyPuzzleTitle}" — ${state.toolResults.chess.dailyPuzzleUrl}`
     : "No puzzle available";
 
-  const energyLevel =
-    (state.userPersona.stats.energy_level as { current?: string })?.current ??
-    "unknown";
-
   const topInterests = state.userPersona.interests
     .slice(0, 5)
     .map((i) => `${i.platform}:${i.ref_id} (weight:${i.weight})`)
@@ -158,24 +181,45 @@ async function reasoningNode(
     ? previousSuggestions.map((s) => `- "${s}"`).join("\n")
     : "None";
 
-  const prompt = `You are the BAF (BoredAF) Rescue Agent. You have the user's data and live world updates.
+  const recentPlatformList = (state.recentPlatforms ?? []).join(", ");
+  const platformRotationWarning =
+    state.recentPlatforms?.length === 3 &&
+    new Set(state.recentPlatforms).size === 1
+      ? `WARNING: Last 3 suggestions were all from "${state.recentPlatforms[0]}". You MUST pick a DIFFERENT platform this time.`
+      : "";
+
+  const prompt = `You are the BAF (BoredAF) Rescue Agent.
+
+ARCHETYPE: "${archetype}"
+STRATEGY: ${strategy}
+
+MOOD CONTEXT:
+- Time of day: ${mood.timeOfDay}
+- Energy: ${mood.energyLevel}
+- Tired: ${mood.isTired}
+- Rejection streak: ${mood.recentRejectionStreak}
+- Mood override active: ${mood.moodOverride}
+${mood.moodOverride ? `(Original archetype was "${state.userPersona.profile.archetype}", temporarily shifted to "${archetype}" due to mood)` : ""}
 
 RULES:
-- If they have a new video from a favorite influencer, prioritize that.
-- If they play chess (ELO ${chessElo ?? "420"}), suggest the Daily Puzzle to keep the momentum.
-- If they rejected the last 2 suggestions, try something COMPLETELY different and creative.
+- Follow the ARCHETYPE STRATEGY above strictly.
+- If "The Grind" and user just lost/failed, suggest a tutorial video instead.
+- If "The Chill", ONLY suggest passive low-effort content.
+- If "The Spark", pick the LEAST used platform for novelty.
+- When suggesting YouTube content, ALWAYS include an actual YouTube video link from the LIVE CONTENT list below.
+- ALL content must be family-friendly and appropriate for all ages. Never suggest 18+ content.
 - Be witty, punchy, and brief. MAX 15 words for the suggestion.
-- NEVER repeat a previous suggestion. Every suggestion MUST be unique and different.
-- If including a link, put it in the "link" field.
+- NEVER repeat a previous suggestion.
+- Never suggest the same platform 3 times in a row.
+${platformRotationWarning}
 
 USER:
 - Username: ${state.userPersona.profile.username}
-- Energy: ${energyLevel}
+- Base Archetype: ${state.userPersona.profile.archetype}
 - Chess ELO: ${chessElo ?? "unknown"}
 - ${puzzleInfo}
 - Top interests: ${topInterests}
-
-REJECTED LAST 2 IN A ROW: ${recentTwoRejected ? "YES — go wild, try something totally unexpected" : "No"}
+- Recent platforms used: ${recentPlatformList || "none"}
 
 ALL PREVIOUS SUGGESTIONS (NEVER repeat these):
 ${allPrevious}
@@ -190,7 +234,7 @@ LIVE CONTENT RIGHT NOW:
 ${videoList}
 
 Respond in EXACTLY this JSON format, nothing else:
-{"suggestion": "max 15 words, witty and specific", "emoji": "one emoji", "vibe": "one word", "source": "youtube|chess|fallback|custom", "link": "url or null"}`;
+{"suggestion": "max 15 words, witty and specific", "emoji": "one emoji", "vibe": "one word", "source": "youtube|chess|fallback|custom", "link": "actual_youtube_url_or_chess_url_or_null"}`;
 
   try {
     const response = await llm.invoke(prompt);
@@ -268,8 +312,10 @@ export async function runBafBrain(userId: string): Promise<Rescue> {
   const result = await graph.invoke({
     userId,
     userPersona: null,
+    mood: null,
     toolResults: null,
     previousSuggestions: [],
+    recentPlatforms: [],
     finalRescue: null,
     error: null,
   });

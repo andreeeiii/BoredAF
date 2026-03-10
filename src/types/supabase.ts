@@ -14,16 +14,19 @@ export interface Database {
           id: string;
           username: string;
           bio: string | null;
+          archetype: string;
         };
         Insert: {
           id?: string;
           username: string;
           bio?: string | null;
+          archetype?: string;
         };
         Update: {
           id?: string;
           username?: string;
           bio?: string | null;
+          archetype?: string;
         };
         Relationships: [];
       };
