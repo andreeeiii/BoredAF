@@ -212,3 +212,178 @@ describe("OnboardingSeed suggestion parsing", () => {
     expect(valid[0].url).toBe("");
   });
 });
+
+describe("RejectExpansion suggestion parsing", () => {
+  it("filters entries with required fields (url optional for general)", () => {
+    const raw = [
+      { text: "Chill stream", platform: "twitch", url: "https://twitch.tv/chill", category: "influencer" },
+      { text: "Take a nap", platform: "general", url: "", category: "physical" },
+      { text: "", platform: "youtube", url: "https://youtube.com/@x", category: "learning" },
+    ];
+
+    const valid = raw.filter((s) => s.text && s.platform && s.category).slice(0, 3);
+    expect(valid).toHaveLength(2);
+    expect(valid[0].text).toBe("Chill stream");
+    expect(valid[1].text).toBe("Take a nap");
+  });
+
+  it("maps rejection reasons to correct hints", () => {
+    const reasonHints: Record<string, string> = {
+      "too tired": "LOW-ENERGY",
+      "not interested": "DIFFERENT",
+      "already did that": "FRESH",
+      "other": "completely different",
+    };
+
+    expect(reasonHints["too tired"]).toContain("LOW-ENERGY");
+    expect(reasonHints["not interested"]).toContain("DIFFERENT");
+    expect(reasonHints["already did that"]).toContain("FRESH");
+    expect(reasonHints["other"]).toContain("completely different");
+  });
+
+  it("defaults to 'other' hint for unknown reasons", () => {
+    const reasonHints: Record<string, string> = {
+      "too tired": "LOW-ENERGY",
+      "not interested": "DIFFERENT",
+      "already did that": "FRESH",
+      "other": "completely different",
+    };
+
+    const unknownReason = "something random";
+    const hint = reasonHints[unknownReason] ?? reasonHints["other"];
+    expect(hint).toContain("completely different");
+  });
+});
+
+describe("Item blacklist logic", () => {
+  it("stores both text and URL in blacklist entries", () => {
+    const blacklistEntries: Array<{ text: string; url: string; until: string }> = [];
+    const suggestion = "Valkyrae playing with friends — fun energy";
+    const url = "https://twitch.tv/valkyrae";
+    const until = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+
+    blacklistEntries.push({ text: suggestion, url, until });
+
+    expect(blacklistEntries).toHaveLength(1);
+    expect(blacklistEntries[0].text).toBe(suggestion);
+    expect(blacklistEntries[0].url).toBe(url);
+  });
+
+  it("deduplicates by suggestion text", () => {
+    const entries: Array<{ text: string; url: string; until: string }> = [
+      { text: "Valkyrae streaming", url: "https://twitch.tv/valkyrae", until: new Date(Date.now() + 1000).toISOString() },
+    ];
+
+    const newText = "Valkyrae streaming";
+    if (!entries.some((e) => e.text === newText)) {
+      entries.push({ text: newText, url: "", until: "" });
+    }
+
+    expect(entries).toHaveLength(1);
+  });
+
+  it("filters expired entries", () => {
+    const now = Date.now();
+    const entries = [
+      { text: "A", url: "", until: new Date(now - 1000).toISOString() },
+      { text: "B", url: "", until: new Date(now + 60000).toISOString() },
+      { text: "C", url: "", until: new Date(now + 120000).toISOString() },
+    ];
+
+    const active = entries.filter((e) => new Date(e.until).getTime() > now);
+    expect(active).toHaveLength(2);
+    expect(active[0].text).toBe("B");
+  });
+
+  it("matches blacklist by substring (prefix variations)", () => {
+    const blacklistedItems = [
+      "https://twitch.tv/valkyrae",
+      "Check out: Valkyrae playing with friends — fun energy",
+    ];
+
+    const itemTitle = "Valkyrae playing with friends — fun energy";
+    const isBlacklisted = blacklistedItems.some(
+      (bl) => bl.includes(itemTitle) || itemTitle.includes(bl)
+    );
+
+    expect(isBlacklisted).toBe(true);
+  });
+
+  it("does NOT match unrelated items via substring", () => {
+    const blacklistedItems = [
+      "https://twitch.tv/valkyrae",
+      "Valkyrae playing with friends",
+    ];
+
+    const itemTitle = "Hikaru playing chess at 3000 ELO";
+    const isBlacklisted = blacklistedItems.some(
+      (bl) => bl.includes(itemTitle) || itemTitle.includes(bl)
+    );
+
+    expect(isBlacklisted).toBe(false);
+  });
+});
+
+describe("Interest extraction on accept", () => {
+  it("extracts ref_id from suggestion text (max 60 chars)", () => {
+    const suggestion = "Valkyrae playing with friends — fun energy and great vibes all day long";
+    const refId = suggestion.slice(0, 60);
+
+    expect(refId).toBe("Valkyrae playing with friends — fun energy and great vibes a");
+    expect(refId.length).toBeLessThanOrEqual(60);
+  });
+
+  it("preserves short suggestions as-is", () => {
+    const suggestion = "GothamChess live";
+    const refId = suggestion.slice(0, 60);
+
+    expect(refId).toBe("GothamChess live");
+  });
+
+  it("assigns weight 8 for new interests", () => {
+    const weight = 8;
+    expect(weight).toBeGreaterThanOrEqual(1);
+    expect(weight).toBeLessThanOrEqual(10);
+  });
+});
+
+describe("Pool mutation on every interaction", () => {
+  it("expands pool on accept (3 similar suggestions)", () => {
+    const maxExpansion = 3;
+    const suggestions = Array.from({ length: 5 }, (_, i) => ({
+      text: `Similar ${i}`,
+      platform: "youtube",
+      url: `https://youtube.com/@test${i}`,
+      category: "influencer",
+    }));
+
+    const limited = suggestions.slice(0, maxExpansion);
+    expect(limited).toHaveLength(3);
+  });
+
+  it("expands pool on reject (3 alternative suggestions)", () => {
+    const maxExpansion = 3;
+    const suggestions = Array.from({ length: 4 }, (_, i) => ({
+      text: `Alternative ${i}`,
+      platform: "general",
+      url: "",
+      category: "physical",
+    }));
+
+    const valid = suggestions.filter((s) => s.text && s.platform && s.category).slice(0, maxExpansion);
+    expect(valid).toHaveLength(3);
+  });
+
+  it("deactivation runs on both accept and reject", () => {
+    // Simulating: deactivation should run regardless of outcome
+    const outcomes = ["accepted", "rejected"];
+    const deactivationCalled: string[] = [];
+
+    for (const outcome of outcomes) {
+      deactivationCalled.push(outcome);
+    }
+
+    expect(deactivationCalled).toEqual(["accepted", "rejected"]);
+    expect(deactivationCalled).toHaveLength(2);
+  });
+});

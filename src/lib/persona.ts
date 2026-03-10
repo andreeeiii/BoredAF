@@ -182,12 +182,12 @@ export async function updatePersona(
     console.log(`[BAF] Blacklisted "${rejectedText.slice(0, 40)}..." for 30 minutes`);
 
     // Generate new alternatives based on rejection reason (fire-and-forget)
-    if (feedback.reason && feedback.source && feedback.source !== "fallback") {
+    if (feedback.source && feedback.source !== "fallback") {
       expandPoolFromReject(
         feedback.suggestion,
         feedback.source,
         feedback.category ?? "general",
-        feedback.reason
+        feedback.reason ?? "other"
       ).catch((err) =>
         console.error("[BAF][RejectExpansion] Non-blocking error:", err)
       );
@@ -208,10 +208,26 @@ export async function updatePersona(
     }
   }
 
-  if (feedback.outcome === "accepted") {
-    // No interest weight boosting — vector nudge handles preference learning naturally.
+  // Run pool cleanup on every interaction (accept or reject)
+  deactivateUnderperformingEntries().catch((err) =>
+    console.error("[BAF][PoolCleanup] Non-blocking error:", err)
+  );
 
+  if (feedback.outcome === "accepted") {
+    // Dynamically add accepted content's platform+category as interest
     if (feedback.source && feedback.source !== "fallback" && feedback.source !== "custom") {
+      const refId = feedback.suggestion.slice(0, 60);
+      await supabase.from("interests").upsert(
+        {
+          user_id: userId,
+          platform: feedback.source,
+          ref_id: refId,
+          weight: 8,
+        },
+        { onConflict: "user_id,platform,ref_id" }
+      );
+      console.log(`[BAF][InterestUpdate] Added interest: ${feedback.source}/${refId.slice(0, 30)}...`);
+
       expandPoolFromAccept(
         feedback.suggestion,
         feedback.source,
@@ -220,10 +236,6 @@ export async function updatePersona(
         console.error("[BAF][PoolExpansion] Non-blocking error:", err)
       );
     }
-
-    deactivateUnderperformingEntries().catch((err) =>
-      console.error("[BAF][PoolCleanup] Non-blocking error:", err)
-    );
   }
 }
 
