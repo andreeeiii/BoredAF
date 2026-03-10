@@ -3,8 +3,9 @@ import { z } from "zod";
 export const YouTubeVideoSchema = z.object({
   title: z.string(),
   videoId: z.string(),
-  channelTitle: z.string(),
   publishedAt: z.string(),
+  thumbnail: z.string(),
+  channelTitle: z.string(),
   url: z.string(),
 });
 
@@ -14,7 +15,7 @@ export const YouTubeResultSchema = z.object({
 });
 
 export const ChessResultSchema = z.object({
-  elo: z.number().nullable(),
+  currentElo: z.number().nullable(),
   dailyPuzzleUrl: z.string().nullable(),
   dailyPuzzleTitle: z.string().nullable(),
   error: z.string().nullable(),
@@ -24,21 +25,25 @@ export type YouTubeVideo = z.infer<typeof YouTubeVideoSchema>;
 export type YouTubeResult = z.infer<typeof YouTubeResultSchema>;
 export type ChessResult = z.infer<typeof ChessResultSchema>;
 
-const FALLBACK_SUGGESTIONS = [
-  "Go for a 5-min walk and get some fresh air",
-  "Do 10 push-ups — you'll feel like a new person",
-  "Make yourself the fanciest drink you can with what's in the kitchen",
-  "Text someone you haven't talked to in a while",
-  "Put on your favorite album and just vibe for 15 minutes",
-  "Learn a magic trick on YouTube — impress yourself",
-  "Write down 3 things you're grateful for right now",
-  "Reorganize your desk — chaos to clarity in 5 minutes",
+const DEFAULT_RESCUES = [
+  "Go drink water and do 10 pushups. You'll thank me.",
+  "Open your window. Breathe. Come back a new person.",
+  "Text someone you haven't talked to in 6 months.",
+  "Make the fanciest drink possible with what's in your kitchen.",
+  "Put on your favorite album and just vibe for 15 min.",
+  "Learn one magic trick on YouTube right now.",
+  "Write 3 things you're grateful for. Seriously, do it.",
+  "Reorganize your desk. Chaos to clarity in 5 min.",
+  "Do a 5-min stretch routine. Your back will love you.",
+  "Go for a walk. No phone. Just vibes.",
 ];
 
-export function getFallbackSuggestion(): string {
-  return FALLBACK_SUGGESTIONS[
-    Math.floor(Math.random() * FALLBACK_SUGGESTIONS.length)
-  ];
+export function getDefaultRescue(exclude: string[] = []): string {
+  const available = DEFAULT_RESCUES.filter(
+    (r) => !exclude.some((e) => r.toLowerCase().includes(e.toLowerCase()))
+  );
+  const pool = available.length > 0 ? available : DEFAULT_RESCUES;
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 export async function fetchYouTubeVideos(
@@ -51,17 +56,29 @@ export async function fetchYouTubeVideos(
   }
 
   try {
+    const twentyFourHoursAgo = new Date(
+      Date.now() - 24 * 60 * 60 * 1000
+    ).toISOString();
+
     const allVideos: YouTubeVideo[] = [];
 
-    for (const channelId of channelIds.slice(0, 3)) {
+    const fetches = channelIds.slice(0, 3).map(async (channelId) => {
+      const params = new URLSearchParams({
+        key: apiKey,
+        channelId,
+        part: "snippet",
+        order: "date",
+        maxResults: "3",
+        type: "video",
+        publishedAfter: twentyFourHoursAgo,
+      });
+
       const res = await fetch(
-        `https://www.googleapis.com/youtube/v3/search?` +
-          `key=${apiKey}&channelId=${channelId}&part=snippet` +
-          `&order=date&maxResults=3&type=video`,
+        `https://www.googleapis.com/youtube/v3/search?${params}`,
         { next: { revalidate: 300 } }
       );
 
-      if (!res.ok) continue;
+      if (!res.ok) return;
 
       const data = await res.json();
 
@@ -71,10 +88,16 @@ export async function fetchYouTubeVideos(
           videoId: item.id.videoId,
           channelTitle: item.snippet.channelTitle,
           publishedAt: item.snippet.publishedAt,
+          thumbnail:
+            item.snippet.thumbnails?.medium?.url ??
+            item.snippet.thumbnails?.default?.url ??
+            "",
           url: `https://youtube.com/watch?v=${item.id.videoId}`,
         });
       }
-    }
+    });
+
+    await Promise.all(fetches);
 
     return YouTubeResultSchema.parse({ videos: allVideos, error: null });
   } catch (err) {
@@ -100,10 +123,10 @@ export async function fetchChessData(
       }),
     ]);
 
-    let elo: number | null = null;
+    let currentElo: number | null = null;
     if (statsRes?.ok) {
       const stats = await statsRes.json();
-      elo =
+      currentElo =
         stats.chess_blitz?.last?.rating ??
         stats.chess_rapid?.last?.rating ??
         null;
@@ -118,14 +141,14 @@ export async function fetchChessData(
     }
 
     return ChessResultSchema.parse({
-      elo,
+      currentElo,
       dailyPuzzleUrl,
       dailyPuzzleTitle,
       error: null,
     });
   } catch (err) {
     return {
-      elo: null,
+      currentElo: null,
       dailyPuzzleUrl: null,
       dailyPuzzleTitle: null,
       error: err instanceof Error ? err.message : "Chess fetch failed",

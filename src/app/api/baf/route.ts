@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runBafAgent } from "@/lib/agent";
+import { runBafBrain } from "@/lib/agent/bafBrain";
 import { updatePersona } from "@/lib/persona";
 
 const DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000000";
@@ -11,7 +11,7 @@ export async function POST(request: Request) {
 
     if (action === "baf") {
       const userId = (body.userId as string) ?? DEFAULT_USER_ID;
-      const rescue = await runBafAgent(userId);
+      const rescue = await runBafBrain(userId);
       return NextResponse.json(rescue);
     }
 

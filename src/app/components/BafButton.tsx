@@ -10,6 +10,7 @@ interface Rescue {
   emoji: string;
   vibe: string;
   source: string;
+  link: string | null;
 }
 
 const WHY_REASONS = [
@@ -48,6 +49,10 @@ export default function BafButton() {
 
   const handleAccept = async () => {
     if (!rescue) return;
+
+    if (rescue.link) {
+      window.open(rescue.link, "_blank", "noopener,noreferrer");
+    }
 
     await fetch("/api/baf", {
       method: "POST",
@@ -176,6 +181,16 @@ export default function BafButton() {
             <span className="text-neutral-500 text-xs uppercase tracking-widest">
               {rescue.vibe} • {rescue.source}
             </span>
+            {rescue.link && (
+              <a
+                href={rescue.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-400 text-xs hover:text-blue-300 underline transition-colors"
+              >
+                {rescue.link.length > 50 ? rescue.link.slice(0, 50) + "..." : rescue.link}
+              </a>
+            )}
             <div className="flex gap-4 mt-2">
               <motion.button
                 whileHover={{ scale: 1.05 }}

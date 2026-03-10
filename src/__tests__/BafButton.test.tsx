@@ -33,6 +33,7 @@ describe("BafButton", () => {
         emoji: "♟️",
         vibe: "chill",
         source: "youtube",
+        link: "https://youtube.com/watch?v=abc123",
       }),
     });
 
@@ -55,6 +56,7 @@ describe("BafButton", () => {
         emoji: "♟️",
         vibe: "active",
         source: "chess",
+        link: null,
       }),
     });
 
