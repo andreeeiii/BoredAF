@@ -462,6 +462,84 @@ export async function expandPoolFromAccept(
   return inserted;
 }
 
+export async function expandPoolFromReject(
+  rejectedText: string,
+  platform: string,
+  category: string,
+  reason: string
+): Promise<number> {
+  const openai = getOpenAI();
+  if (!openai) return 0;
+
+  const reasonHints: Record<string, string> = {
+    "too tired": "Suggest LOW-ENERGY alternatives: passive watching, short videos, chill streams, relaxing activities. Nothing physical or demanding.",
+    "not interested": "Suggest DIFFERENT types of content on the same or different platforms. Shift category/genre entirely.",
+    "already did that": "Suggest FRESH content the user hasn't seen — newer creators, trending content, different sub-genres.",
+    "other": "Suggest something completely different — new platform, new category, surprise the user.",
+  };
+
+  const hint = reasonHints[reason] ?? reasonHints["other"];
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0.95,
+      max_tokens: 500,
+      messages: [
+        {
+          role: "system",
+          content: `You generate content suggestions for an anti-boredom app. All suggestions must be family-friendly. Return ONLY a JSON array, no markdown.`,
+        },
+        {
+          role: "user",
+          content: `A user REJECTED this suggestion: "${rejectedText}" (platform: ${platform}, category: ${category}).
+Reason: "${reason}"
+
+${hint}
+
+Generate exactly 3 ALTERNATIVE suggestions that address their rejection reason. Use any platform. Each must have a REAL URL to actual content/creators.
+
+URL formats: YouTube: https://youtube.com/@Name, Twitch: https://twitch.tv/name, TikTok: https://tiktok.com/@name, General activities: empty url
+
+Return JSON array: [{"text": "short description under 60 chars", "platform": "youtube|twitch|tiktok|chess|general", "url": "real_url_or_empty", "category": "influencer|gaming|creative|physical|learning|music|adventure|general"}]`,
+        },
+      ],
+    });
+
+    const content = response.choices[0]?.message?.content?.trim();
+    if (!content) return 0;
+
+    const cleaned = content.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
+    const parsed = JSON.parse(cleaned) as PoolExpansionSuggestion[];
+    if (!Array.isArray(parsed)) return 0;
+
+    const valid = parsed.filter((s) => s.text && s.platform && s.category).slice(0, 3);
+    let inserted = 0;
+
+    for (const s of valid) {
+      const { data: existing } = await supabase
+        .from("suggestion_pool")
+        .select("id")
+        .or(`content_text.eq.${s.text}${s.url ? `,url.eq.${s.url}` : ""}`)
+        .limit(1);
+
+      if (existing && existing.length > 0) continue;
+
+      const id = await embedSuggestionPoolEntry(s.text, s.category, s.platform, s.url || "");
+      if (id) {
+        inserted++;
+        console.log(`[BAF][RejectExpansion] Added: "${s.text.slice(0, 40)}..." (${s.platform}) → ${id}`);
+      }
+    }
+
+    console.log(`[BAF][RejectExpansion] Expanded pool by ${inserted} entries (reason: "${reason}")`);
+    return inserted;
+  } catch (err) {
+    console.error("[BAF][RejectExpansion] LLM error:", err instanceof Error ? err.message : err);
+    return 0;
+  }
+}
+
 export async function deactivateUnderperformingEntries(): Promise<number> {
   const { data: candidates, error: fetchErr } = await supabase
     .from("suggestion_pool")

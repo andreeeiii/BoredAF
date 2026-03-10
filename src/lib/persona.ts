@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { nudgePersonaVector, updatePoolEngagement, expandPoolFromAccept, deactivateUnderperformingEntries } from "./embeddings";
+import { nudgePersonaVector, updatePoolEngagement, expandPoolFromAccept, expandPoolFromReject, deactivateUnderperformingEntries } from "./embeddings";
 
 export interface Persona {
   profile: {
@@ -79,10 +79,12 @@ export async function getPersona(userId: string): Promise<Persona> {
   // The vector nudge + item blacklist + circuit breaker handle deprioritization naturally.
   const blacklistedPlatforms: string[] = [];
 
-  const rawItemBlacklist = (itemBlacklistRes.data?.value as { entries?: Array<{ url: string; until: string }> })?.entries ?? [];
-  const blacklistedItems = rawItemBlacklist
-    .filter((e) => new Date(e.until).getTime() > now)
-    .map((e) => e.url);
+  const rawItemBlacklist = (itemBlacklistRes.data?.value as { entries?: Array<{ text?: string; url: string; until: string }> })?.entries ?? [];
+  const activeItemBlacklist = rawItemBlacklist.filter((e) => new Date(e.until).getTime() > now);
+  const blacklistedItems = [
+    ...activeItemBlacklist.map((e) => e.url).filter(Boolean),
+    ...activeItemBlacklist.map((e) => e.text).filter((t): t is string => !!t),
+  ];
 
   if (blacklistedItems.length > 0) {
     console.log(`[BAF] Active item blacklist (${blacklistedItems.length} items): [${blacklistedItems.slice(0, 3).join(", ")}${blacklistedItems.length > 3 ? "..." : ""}]`);
@@ -147,100 +149,67 @@ export async function updatePersona(
   }
 
   if (feedback.outcome === "rejected") {
-    // NOTE: No platform-level blacklist — rejecting a single item should NOT block
-    // the entire platform. The vector nudge (persona shifts away from rejected content)
-    // and item-level blacklist handle deprioritization naturally.
+    // Blacklist by BOTH suggestion text and URL — prevents exact re-suggestion for 30 min
+    const ITEM_BLACKLIST_DURATION_MS = 30 * 60 * 1000;
+    const itemUntil = new Date(Date.now() + ITEM_BLACKLIST_DURATION_MS).toISOString();
 
-    const rejectedUrl = feedback.link ?? null;
-    if (rejectedUrl) {
-      const ITEM_BLACKLIST_DURATION_MS = 60 * 60 * 1000;
-      const itemUntil = new Date(Date.now() + ITEM_BLACKLIST_DURATION_MS).toISOString();
+    const { data: existingItems } = await supabase
+      .from("persona_stats")
+      .select("value")
+      .eq("user_id", userId)
+      .eq("category", "item_blacklist")
+      .single();
 
-      const { data: existingItems } = await supabase
-        .from("persona_stats")
-        .select("value")
-        .eq("user_id", userId)
-        .eq("category", "item_blacklist")
-        .single();
+    const currentItemEntries = (existingItems?.value as { entries?: Array<{ text: string; url: string; until: string }> })?.entries ?? [];
+    const filteredItems = currentItemEntries.filter((e) => new Date(e.until).getTime() > Date.now());
 
-      const currentItemEntries = (existingItems?.value as { entries?: Array<{ url: string; until: string }> })?.entries ?? [];
-      const filteredItems = currentItemEntries.filter((e) => new Date(e.until).getTime() > Date.now());
-      if (!filteredItems.some((e) => e.url === rejectedUrl)) {
-        filteredItems.push({ url: rejectedUrl, until: itemUntil });
-      }
-
-      await supabase.from("persona_stats").upsert(
-        {
-          user_id: userId,
-          category: "item_blacklist",
-          value: { entries: filteredItems },
-          last_updated: new Date().toISOString(),
-        },
-        { onConflict: "user_id,category" }
-      );
-
-      console.log(`[BAF] Blacklisted item "${rejectedUrl}" for 60 minutes (until ${itemUntil})`);
+    const rejectedUrl = feedback.link ?? "";
+    const rejectedText = feedback.suggestion;
+    if (!filteredItems.some((e) => e.text === rejectedText)) {
+      filteredItems.push({ text: rejectedText, url: rejectedUrl, until: itemUntil });
     }
 
-    if (feedback.reason) {
-      const { data: interests } = await supabase
-        .from("interests")
-        .select("*")
-        .eq("user_id", userId);
+    await supabase.from("persona_stats").upsert(
+      {
+        user_id: userId,
+        category: "item_blacklist",
+        value: { entries: filteredItems },
+        last_updated: new Date().toISOString(),
+      },
+      { onConflict: "user_id,category" }
+    );
 
-      for (const interest of interests ?? []) {
-        if (
-          feedback.suggestion
-            .toLowerCase()
-            .includes(interest.platform.toLowerCase())
-        ) {
-          const newWeight = Math.max(1, interest.weight - 1);
-          await supabase
-            .from("interests")
-            .update({ weight: newWeight })
-            .eq("user_id", userId)
-            .eq("platform", interest.platform)
-            .eq("ref_id", interest.ref_id);
-        }
-      }
+    console.log(`[BAF] Blacklisted "${rejectedText.slice(0, 40)}..." for 30 minutes`);
 
-      if (feedback.reason === "too tired") {
-        await supabase
-          .from("persona_stats")
-          .upsert(
-            {
-              user_id: userId,
-              category: "energy_level",
-              value: { current: "low" },
-              last_updated: new Date().toISOString(),
-            },
-            { onConflict: "user_id,category" }
-          );
-      }
+    // Generate new alternatives based on rejection reason (fire-and-forget)
+    if (feedback.reason && feedback.source && feedback.source !== "fallback") {
+      expandPoolFromReject(
+        feedback.suggestion,
+        feedback.source,
+        feedback.category ?? "general",
+        feedback.reason
+      ).catch((err) =>
+        console.error("[BAF][RejectExpansion] Non-blocking error:", err)
+      );
+    }
+
+    if (feedback.reason === "too tired") {
+      await supabase
+        .from("persona_stats")
+        .upsert(
+          {
+            user_id: userId,
+            category: "energy_level",
+            value: { current: "low" },
+            last_updated: new Date().toISOString(),
+          },
+          { onConflict: "user_id,category" }
+        );
     }
   }
 
   if (feedback.outcome === "accepted") {
-    const { data: interests } = await supabase
-      .from("interests")
-      .select("*")
-      .eq("user_id", userId);
-
-    for (const interest of interests ?? []) {
-      if (
-        feedback.suggestion
-          .toLowerCase()
-          .includes(interest.platform.toLowerCase())
-      ) {
-        const newWeight = Math.min(20, interest.weight + 1);
-        await supabase
-          .from("interests")
-          .update({ weight: newWeight })
-          .eq("user_id", userId)
-          .eq("platform", interest.platform)
-          .eq("ref_id", interest.ref_id);
-      }
-    }
+    // No interest weight boosting — vector nudge handles preference learning naturally.
 
     if (feedback.source && feedback.source !== "fallback" && feedback.source !== "custom") {
       expandPoolFromAccept(

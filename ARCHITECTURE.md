@@ -239,12 +239,20 @@ When a user **accepts** a suggestion, the pool automatically expands with simila
   Pool grows organically from user taste!
 ```
 
-### Rules
-- **Triggered on accept only** — rejections don't grow the pool (they shift persona away)
-- **Deduplication**: Skips if `content_text` or `url` already exists in pool
-- **Rate limit**: Max 3 new entries per accept, non-blocking (fire-and-forget)
-- **Deactivation**: Entries with >10 shows and <10% accept rate are marked `is_active = false`
-- **Cost**: ~500 tokens per expansion = $0.00001 per accept
+### On Accept (LFG)
+- 3 similar suggestions generated and inserted (non-blocking)
+- Deduplication: Skips if `content_text` or `url` already exists
+
+### On Reject (Nah)
+- 3 **alternative** suggestions generated based on the rejection reason (non-blocking)
+- "Too tired" → low-energy alternatives; "Not interested" → different genre; "Already did that" → fresher content
+- Rejected item blacklisted by text + URL for 30 minutes (substring matching)
+- Persona vector nudges AWAY from rejected content
+- No platform-level blacklist — rejecting one YouTube video does NOT block all YouTube
+
+### Deactivation
+- Entries with >10 shows and <10% accept rate are marked `is_active = false`
+- **Cost**: ~500 tokens per expansion = $0.00001 per interaction
 
 ## Semantic Persona Matching (pgvector)
 

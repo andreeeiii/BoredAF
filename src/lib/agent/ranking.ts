@@ -146,8 +146,13 @@ export function rankContent(
       item.score = -999;
     }
 
-    if (item.url && blacklistedItems.includes(item.url)) {
-      console.log(`[BAF][ItemBlacklist] "${item.url}" is blacklisted — score ${item.score} → -999`);
+    const isItemBlacklisted =
+      (item.url && blacklistedItems.includes(item.url)) ||
+      blacklistedItems.some((bl) =>
+        bl.includes(item.title) || item.title.includes(bl)
+      );
+    if (isItemBlacklisted) {
+      console.log(`[BAF][ItemBlacklist] "${item.title.slice(0, 40)}" is blacklisted — score ${item.score} → -999`);
       item.score = -999;
     }
 
