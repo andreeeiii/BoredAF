@@ -13,6 +13,9 @@ interface Rescue {
   link: string | null;
   isLive?: boolean;
   archetype?: string;
+  twitchUsername?: string;
+  viewerCount?: number | null;
+  gameName?: string | null;
 }
 
 const WHY_REASONS = [
@@ -219,6 +222,29 @@ export default function BafButton() {
                 {platformStyle?.label ?? rescue.source} • {rescue.vibe}
               </span>
             </div>
+            {rescue.source === "twitch" && (rescue.viewerCount || rescue.gameName || rescue.twitchUsername) && (
+              <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-purple-900/20 border border-purple-500/30">
+                <span className="text-purple-400 text-lg font-bold">◉</span>
+                <div className="flex flex-col items-start text-left">
+                  {rescue.twitchUsername && (
+                    <span className="text-purple-300 text-sm font-semibold">
+                      {rescue.twitchUsername}
+                    </span>
+                  )}
+                  <div className="flex items-center gap-2 text-xs text-neutral-400">
+                    {rescue.gameName && (
+                      <span>Playing <span className="text-purple-200">{rescue.gameName}</span></span>
+                    )}
+                    {rescue.viewerCount != null && rescue.viewerCount > 0 && (
+                      <span className="flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block" />
+                        {rescue.viewerCount.toLocaleString()} viewers
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
             {rescue.link && (
               <a
                 href={rescue.link}

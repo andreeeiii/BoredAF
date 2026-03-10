@@ -21,15 +21,20 @@ import {
   type MoodState,
 } from "../mood";
 import { rankContent, type RankedItem, type RankingInput } from "./ranking";
+import { computeCategoryWeights, type CategoryWeights } from "./circuitBreaker";
+import { searchSemanticSuggestions, type SemanticMatch } from "../embeddings";
 
 export const RescueSchema = z.object({
   suggestion: z.string(),
   emoji: z.string(),
   vibe: z.string(),
-  source: z.enum(["youtube", "chess", "twitch", "tiktok", "fallback", "custom"]),
+  source: z.enum(["youtube", "chess", "twitch", "tiktok", "semantic", "fallback", "custom"]),
   link: z.string().nullable(),
   isLive: z.boolean().optional(),
   archetype: z.string().optional(),
+  twitchUsername: z.string().optional(),
+  viewerCount: z.number().nullable().optional(),
+  gameName: z.string().nullable().optional(),
 });
 
 export type Rescue = z.infer<typeof RescueSchema>;
@@ -42,6 +47,9 @@ const BafState = Annotation.Root({
   rankedContent: Annotation<RankedItem[]>,
   previousSuggestions: Annotation<string[]>,
   recentPlatforms: Annotation<string[]>,
+  blacklistedPlatforms: Annotation<string[]>,
+  categoryWeights: Annotation<CategoryWeights>,
+  semanticMatches: Annotation<SemanticMatch[]>,
   finalRescue: Annotation<Rescue | null>,
   error: Annotation<string | null>,
 });
@@ -56,14 +64,17 @@ async function contextNode(
 
     const previousSuggestions = persona.recentHistory.map((h) => h.suggestion);
 
-    const recentPlatforms = persona.recentHistory.slice(0, 3).map((h) => {
-      const s = h.suggestion.toLowerCase();
-      if (s.includes("twitch") || s.includes("stream")) return "twitch";
-      if (s.includes("tiktok")) return "tiktok";
-      if (s.includes("youtube") || s.includes("watch") || s.includes("video")) return "youtube";
-      if (s.includes("chess") || s.includes("puzzle") || s.includes("elo")) return "chess";
-      return "custom";
-    });
+    const recentPlatforms = persona.recentHistory
+      .slice(0, 5)
+      .map((h) => h.source ?? "custom")
+      .filter((s) => s !== "custom" && s !== "fallback");
+
+    const categoryWeights = computeCategoryWeights(persona.recentHistory);
+    console.log(`[BAF][Context] Archetype: "${persona.profile.archetype}"`);
+    console.log(`[BAF][Context] Interests: ${JSON.stringify(persona.interests)}`);
+    console.log(`[BAF][Context] Blacklisted: [${persona.blacklistedPlatforms.join(", ")}]`);
+    console.log(`[BAF][Context] Recent platforms (from source field): [${recentPlatforms.join(", ")}]`);
+    console.log(`[BAF][CircuitBreaker] Category weights: ${JSON.stringify(categoryWeights)}`);
 
     const energyLevel =
       (persona.stats.energy_level as { current?: string })?.current ?? "mixed";
@@ -78,6 +89,8 @@ async function contextNode(
       userPersona: persona,
       previousSuggestions,
       recentPlatforms,
+      blacklistedPlatforms: persona.blacklistedPlatforms,
+      categoryWeights,
       mood,
       error: null,
     };
@@ -92,6 +105,14 @@ async function contextNode(
   }
 }
 
+const DEFAULT_YOUTUBE_CHANNELS = [
+  "UCX6OQ3DkcsbYNE6H8uQQuVA", // MrBeast
+  "UCq-Fj5jknLsUf-MWSy4_brA", // Kurzgesagt
+  "UC2C_jShtL725hvbm1arSV9w", // GCN (cycling/fitness)
+];
+const DEFAULT_TWITCH_STREAMERS = ["shroud", "pokimane", "xqc"];
+const DEFAULT_TIKTOK_CREATORS = ["khaby.lame", "charlidamelio", "zachking"];
+
 async function parallelFetchNode(
   state: BafStateType
 ): Promise<Partial<BafStateType>> {
@@ -99,38 +120,65 @@ async function parallelFetchNode(
     return { toolResults: null };
   }
 
-  const youtubeChannels = state.userPersona.interests
+  const interests = state.userPersona.interests;
+  const hasAnyInterests = interests.length > 0;
+
+  const youtubeChannels = interests
     .filter((i) => i.platform === "youtube")
     .map((i) => i.ref_id);
 
-  const twitchUsernames = state.userPersona.interests
+  const twitchUsernames = interests
     .filter((i) => i.platform === "twitch")
     .map((i) => i.ref_id);
 
-  const tiktokUsernames = state.userPersona.interests
+  const tiktokUsernames = interests
     .filter((i) => i.platform === "tiktok")
     .map((i) => i.ref_id);
 
+  const hasChessInterest = interests.some(
+    (i) => i.platform === "chess" || i.platform === "game"
+  );
   const chessStats = state.userPersona.stats.chess as
     | { username?: string }
     | undefined;
 
-  const [youtube, chess, twitch, tiktok] = await Promise.all([
-    youtubeChannels.length > 0
-      ? fetchYouTubeVideos(youtubeChannels)
+  const finalYoutube = youtubeChannels.length > 0 ? youtubeChannels : (hasAnyInterests ? [] : DEFAULT_YOUTUBE_CHANNELS);
+  const finalTwitch = twitchUsernames.length > 0 ? twitchUsernames : (hasAnyInterests ? [] : DEFAULT_TWITCH_STREAMERS);
+  const finalTiktok = tiktokUsernames.length > 0 ? tiktokUsernames : (hasAnyInterests ? [] : DEFAULT_TIKTOK_CREATORS);
+
+  if (!hasAnyInterests) {
+    console.log(`[BAF][Fetch] No interests found — using default content sources across all platforms`);
+  }
+
+  const personaEmbedding = state.userPersona.profile.persona_embedding;
+
+  const [youtube, chess, twitch, tiktok, semantic] = await Promise.all([
+    finalYoutube.length > 0
+      ? fetchYouTubeVideos(finalYoutube)
       : Promise.resolve({ videos: [], error: null } as YouTubeResult),
-    fetchChessData(chessStats?.username),
-    twitchUsernames.length > 0
-      ? fetchTwitchStreams(twitchUsernames)
+    hasChessInterest
+      ? fetchChessData(chessStats?.username)
+      : Promise.resolve({ currentElo: null, dailyPuzzleUrl: null, dailyPuzzleTitle: null, error: null } as ChessResult),
+    finalTwitch.length > 0
+      ? fetchTwitchStreams(finalTwitch)
       : Promise.resolve({ streams: [], error: null } as TwitchResult),
     Promise.resolve(
-      tiktokUsernames.length > 0
-        ? fetchTikTokLinks(tiktokUsernames)
+      finalTiktok.length > 0
+        ? fetchTikTokLinks(finalTiktok)
         : ({ links: [], error: null } as TikTokResult)
     ),
+    personaEmbedding
+      ? searchSemanticSuggestions(personaEmbedding, 10, 0.1)
+      : Promise.resolve([] as SemanticMatch[]),
   ]);
 
-  return { toolResults: { youtube, chess, twitch, tiktok } };
+  if (semantic.length > 0) {
+    console.log(`[BAF][SemanticFetch] Got ${semantic.length} semantic matches (top: "${semantic[0].content_text.slice(0, 40)}..." sim=${semantic[0].similarity.toFixed(3)})`);
+  } else if (personaEmbedding) {
+    console.log(`[BAF][SemanticFetch] No semantic matches found (persona embedding exists but no pool matches)`);
+  }
+
+  return { toolResults: { youtube, chess, twitch, tiktok }, semanticMatches: semantic };
 }
 
 async function rankingNode(
@@ -140,14 +188,44 @@ async function rankingNode(
     return { rankedContent: [] };
   }
 
+  const recentHistory = (state.userPersona?.recentHistory ?? []).map((h) => ({
+    suggestion: h.suggestion,
+    outcome: h.outcome,
+    source: h.source,
+  }));
+
   const ranked = rankContent(
     state.toolResults,
     state.mood.effectiveArchetype,
     state.recentPlatforms ?? [],
-    state.previousSuggestions ?? []
+    state.previousSuggestions ?? [],
+    recentHistory,
+    state.blacklistedPlatforms ?? [],
+    state.categoryWeights ?? {},
+    state.semanticMatches ?? []
   );
 
   return { rankedContent: ranked };
+}
+
+function enrichWithTwitchMeta(
+  rescue: Rescue,
+  ranked: RankedItem[]
+): Rescue {
+  if (rescue.source !== "twitch") return rescue;
+
+  const match = ranked.find(
+    (r) => r.platform === "twitch" && r.url === rescue.link
+  ) ?? ranked.find((r) => r.platform === "twitch");
+
+  if (!match) return rescue;
+
+  return {
+    ...rescue,
+    twitchUsername: (match.metadata.username as string) ?? undefined,
+    viewerCount: (match.metadata.viewerCount as number) ?? null,
+    gameName: (match.metadata.gameName as string) ?? null,
+  };
 }
 
 async function reasoningNode(
@@ -174,16 +252,17 @@ async function reasoningNode(
   if (!apiKey) {
     const topItem = (state.rankedContent ?? [])[0];
     if (topItem) {
+      const base: Rescue = {
+        suggestion: `Check out: ${topItem.title.slice(0, 60)}`,
+        emoji: topItem.isLive ? "🔴" : "🎯",
+        vibe: topItem.isLive ? "live" : "discover",
+        source: topItem.platform,
+        link: topItem.url,
+        isLive: topItem.isLive,
+        archetype: state.mood?.effectiveArchetype ?? "The Spark",
+      };
       return {
-        finalRescue: {
-          suggestion: `Check out: ${topItem.title.slice(0, 60)}`,
-          emoji: topItem.isLive ? "🔴" : "🎯",
-          vibe: topItem.isLive ? "live" : "discover",
-          source: topItem.platform,
-          link: topItem.url,
-          isLive: topItem.isLive,
-          archetype: state.mood?.effectiveArchetype ?? "The Spark",
-        },
+        finalRescue: enrichWithTwitchMeta(base, state.rankedContent ?? []),
       };
     }
     return {
@@ -220,7 +299,8 @@ async function reasoningNode(
     .map((h) => `"${h.suggestion}"`)
     .join("\n- ");
 
-  const ranked = (state.rankedContent ?? []).slice(0, 8);
+  const allRanked = state.rankedContent ?? [];
+  const ranked = weightedTopPick(allRanked).slice(0, 8);
   const contentList = ranked.length > 0
     ? ranked.map((r) =>
         `[${r.platform.toUpperCase()}${r.isLive ? " 🔴 LIVE" : ""}] "${r.title}" — ${r.url} (score: ${r.score})`
@@ -246,41 +326,45 @@ async function reasoningNode(
 
   const recentPlatformList = (state.recentPlatforms ?? []).join(", ");
 
-  const prompt = `You are the BAF (BoredAF) Rescue Agent. Generate a UNIQUE suggestion for user "${state.userPersona.profile.username}". Request ID: ${uniqueId}
+  const prompt = `You are an adaptive life-coach and curator for the BAF (BoredAF) app — NOT a search engine. You understand the user's IDENTITY and suggest content that matches WHO THEY ARE, not just what data you have.
 
-ARCHETYPE: "${archetype}"
-STRATEGY: ${strategy}
+A "Nah" is NOT a request for a "better" version of the same thing — it means the user is BORED OF THAT ENTIRE SUBJECT. Pivot 180 degrees. If you suggested a game, suggest a video. If you suggested a video, suggest a physical activity or social content.
 
-MOOD: ${mood.timeOfDay} | energy: ${mood.energyLevel} | tired: ${mood.isTired} | rejection streak: ${mood.recentRejectionStreak}
-${mood.moodOverride ? `(Mood shifted from "${state.userPersona.profile.archetype}" to "${archetype}")` : ""}
+Generate a UNIQUE suggestion for user "${state.userPersona.profile.username}". Request ID: ${uniqueId}
 
-CRITICAL RULES:
-1. Your suggestion text MUST be completely unique — never the same wording as any previous suggestion listed below. Rephrase, use different words, different angles.
-2. You MUST include a real clickable URL in the "link" field. Pick one from the RANKED CONTENT below.
-3. If suggesting YouTube/Twitch/TikTok, the link MUST be from the list. Do NOT make up URLs.
-4. If a streamer is LIVE, strongly prefer them (especially for Chill/Spark).
-5. ALL content must be family-friendly. No 18+ content ever.
-6. MAX 15 words. Be witty, punchy, specific to the content you're linking.
-7. Never suggest the same platform 3 times in a row. Recent: [${recentPlatformList || "none"}]
-${archetype === "The Spark" ? "8. SPARK MODE: Pick the most unexpected/unusual content from the list." : ""}
-${archetype === "The Grind" ? `8. GRIND MODE: Chess ELO is ${chessElo ?? "unknown"}. Prioritize skill-building content.` : ""}
-${archetype === "The Chill" ? "8. CHILL MODE: Only passive, relaxing content. Nothing that feels like work." : ""}
-${hasLive ? `\n🔴 LIVE STREAMS AVAILABLE — Consider these first for Chill/Spark users.` : ""}
+USER IDENTITY:
+- Archetype: "${archetype}" — Strategy: ${strategy}
+- Core interests: [${topInterests || "none specified"}]
+- Mood: ${mood.timeOfDay} | energy: ${mood.energyLevel} | tired: ${mood.isTired} | rejection streak: ${mood.recentRejectionStreak}
+${mood.moodOverride ? `- Mood shifted from "${state.userPersona.profile.archetype}" to "${archetype}"` : ""}
 
-RANKED CONTENT (pick from these, higher score = better match):
+ABSOLUTE RULES (violating ANY = failure):
+1. PERSONA-FIRST: Only suggest content that matches the user's CORE INTERESTS listed above. If the content doesn't connect to their interests, DO NOT suggest it.
+2. You MUST include a real clickable URL in the "link" field from the RANKED CONTENT below.
+3. Do NOT make up URLs. Only use URLs from the list.
+4. ALL content must be family-friendly.
+5. MAX 15 words. Be witty, punchy, specific.
+6. STRICT ROTATION: You are FORBIDDEN from suggesting the same platform twice in a row. Recent: [${recentPlatformList || "none"}]. Pick a DIFFERENT platform.
+${(state.blacklistedPlatforms ?? []).length > 0 ? `7. BLACKLISTED (user rejected — DO NOT suggest): [${(state.blacklistedPlatforms ?? []).join(", ")}]. These are BANNED.\n` : ""}8. Every "Nah" = COMMAND to switch to a COMPLETELY different platform AND subject. Never retry rejected categories.
+${archetype === "The Spark" ? "9. SPARK MODE: Pick the most unexpected/unusual content." : ""}
+${archetype === "The Grind" ? `9. GRIND MODE: Chess ELO is ${chessElo ?? "unknown"}. Skill-building content — but ONLY if chess is in their interests.` : ""}
+${archetype === "The Chill" ? "9. CHILL MODE: Passive, relaxing content only." : ""}
+${hasLive ? `\n🔴 LIVE STREAMS AVAILABLE — Strongly prefer these.` : ""}
+
+RANKED CONTENT (pick from these — higher score = better persona match):
 ${contentList}
 
-ALL PREVIOUS SUGGESTIONS (NEVER repeat wording — use completely different words):
+PREVIOUS SUGGESTIONS (NEVER repeat):
 ${allPrevious}
 
-RECENT REJECTIONS:
+REJECTIONS (these subjects are DEAD — never revisit):
 ${rejections ? `- ${rejections}` : "None"}
 
-RECENT ACCEPTS:
+ACCEPTS:
 ${accepts ? `- ${accepts}` : "None"}
 
 Respond in EXACTLY this JSON format:
-{"suggestion": "unique witty text max 15 words", "emoji": "one emoji", "vibe": "one word", "source": "youtube|chess|twitch|tiktok|custom", "link": "real_url_from_list_above", "isLive": false}`;
+{"suggestion": "unique witty text max 15 words", "emoji": "one emoji", "vibe": "one word", "source": "youtube|chess|twitch|tiktok|semantic|custom", "link": "real_url_from_list_above_or_null_for_semantic", "isLive": false}`;
 
   try {
     const response = await llm.invoke(prompt);
@@ -303,7 +387,10 @@ Respond in EXACTLY this JSON format:
 
     parsed.archetype = archetype;
 
-    const rescue = RescueSchema.parse(parsed);
+    const rescue = enrichWithTwitchMeta(
+      RescueSchema.parse(parsed),
+      ranked
+    );
 
     const isDuplicate = previousSuggestions.some(
       (prev) => prev.toLowerCase() === rescue.suggestion.toLowerCase()
@@ -318,16 +405,17 @@ Respond in EXACTLY this JSON format:
       );
 
       if (fallbackItem) {
+        const base: Rescue = {
+          suggestion: `${fallbackItem.isLive ? "🔴 LIVE: " : ""}${fallbackItem.title.slice(0, 60)}`,
+          emoji: fallbackItem.isLive ? "🔴" : "🎯",
+          vibe: fallbackItem.isLive ? "live" : "discover",
+          source: fallbackItem.platform,
+          link: fallbackItem.url,
+          isLive: fallbackItem.isLive,
+          archetype,
+        };
         return {
-          finalRescue: {
-            suggestion: `${fallbackItem.isLive ? "🔴 LIVE: " : ""}${fallbackItem.title.slice(0, 60)}`,
-            emoji: fallbackItem.isLive ? "🔴" : "🎯",
-            vibe: fallbackItem.isLive ? "live" : "discover",
-            source: fallbackItem.platform,
-            link: fallbackItem.url,
-            isLive: fallbackItem.isLive,
-            archetype,
-          },
+          finalRescue: enrichWithTwitchMeta(base, ranked),
         };
       }
 
@@ -348,16 +436,17 @@ Respond in EXACTLY this JSON format:
   } catch {
     const topItem = (state.rankedContent ?? [])[0];
     if (topItem) {
+      const base: Rescue = {
+        suggestion: `${topItem.isLive ? "🔴 LIVE: " : ""}${topItem.title.slice(0, 60)}`,
+        emoji: topItem.isLive ? "🔴" : "🎯",
+        vibe: topItem.isLive ? "live" : "discover",
+        source: topItem.platform,
+        link: topItem.url,
+        isLive: topItem.isLive,
+        archetype,
+      };
       return {
-        finalRescue: {
-          suggestion: `${topItem.isLive ? "🔴 LIVE: " : ""}${topItem.title.slice(0, 60)}`,
-          emoji: topItem.isLive ? "🔴" : "🎯",
-          vibe: topItem.isLive ? "live" : "discover",
-          source: topItem.platform,
-          link: topItem.url,
-          isLive: topItem.isLive,
-          archetype,
-        },
+        finalRescue: enrichWithTwitchMeta(base, state.rankedContent ?? []),
       };
     }
     return {
@@ -374,17 +463,93 @@ Respond in EXACTLY this JSON format:
   }
 }
 
+function weightedTopPick(items: RankedItem[]): RankedItem[] {
+  if (items.length <= 3) return items;
+
+  const top3 = items.slice(0, 3);
+  const rest = items.slice(3);
+
+  const minScore = Math.min(...top3.map((i) => i.score));
+  const weights = top3.map((i) => Math.max(1, i.score - minScore + 10));
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+
+  let roll = Math.random() * totalWeight;
+  let pickedIndex = 0;
+  for (let i = 0; i < weights.length; i++) {
+    roll -= weights[i];
+    if (roll <= 0) {
+      pickedIndex = i;
+      break;
+    }
+  }
+
+  const picked = top3[pickedIndex];
+  const remaining = [...top3.slice(0, pickedIndex), ...top3.slice(pickedIndex + 1), ...rest];
+  console.log(`[BAF][WeightedRandom] Picked "${picked.platform}" (score:${picked.score}) from top-3: ${top3.map((i) => `${i.platform}:${i.score}`).join(", ")}`);
+  return [picked, ...remaining];
+}
+
+async function validationNode(
+  state: BafStateType
+): Promise<Partial<BafStateType>> {
+  const rescue = state.finalRescue;
+  if (!rescue || !state.userPersona) return {};
+
+  if (rescue.source === "fallback" || rescue.source === "custom" || rescue.source === "semantic") return {};
+
+  const userPlatforms = state.userPersona.interests.map((i) => i.platform);
+
+  if (userPlatforms.length === 0) {
+    console.log(`[BAF][Validation] SKIP — no interests defined, accepting all platforms`);
+    return {};
+  }
+
+  const hasInterest = userPlatforms.includes(rescue.source) ||
+    (rescue.source === "chess" && userPlatforms.some((p) => p === "chess" || p === "game"));
+
+  if (hasInterest) {
+    console.log(`[BAF][Validation] PASS — "${rescue.source}" matches user interests [${userPlatforms.join(", ")}]`);
+    return {};
+  }
+
+  console.log(`[BAF][Validation] FAIL — "${rescue.source}" not in user interests [${userPlatforms.join(", ")}]. Re-rolling...`);
+
+  const ranked = state.rankedContent ?? [];
+  const matchingItem = ranked.find((r) =>
+    userPlatforms.includes(r.platform) ||
+    (r.platform === "chess" && userPlatforms.some((p) => p === "chess" || p === "game"))
+  );
+
+  if (matchingItem) {
+    const base: Rescue = {
+      suggestion: `${matchingItem.isLive ? "\u{1F534} LIVE: " : ""}${matchingItem.title.slice(0, 60)}`,
+      emoji: matchingItem.isLive ? "\u{1F534}" : "\u{1F3AF}",
+      vibe: matchingItem.isLive ? "live" : "discover",
+      source: matchingItem.platform,
+      link: matchingItem.url,
+      isLive: matchingItem.isLive,
+      archetype: state.mood?.effectiveArchetype ?? "The Spark",
+    };
+    console.log(`[BAF][Validation] Re-rolled to "${matchingItem.platform}" — "${matchingItem.title}"`);
+    return { finalRescue: enrichWithTwitchMeta(base, ranked) };
+  }
+
+  return {};
+}
+
 function buildGraph() {
   const graph = new StateGraph(BafState)
     .addNode("context", contextNode)
     .addNode("parallelFetch", parallelFetchNode)
     .addNode("ranking", rankingNode)
     .addNode("reasoning", reasoningNode)
+    .addNode("validation", validationNode)
     .addEdge("__start__", "context")
     .addEdge("context", "parallelFetch")
     .addEdge("parallelFetch", "ranking")
     .addEdge("ranking", "reasoning")
-    .addEdge("reasoning", END);
+    .addEdge("reasoning", "validation")
+    .addEdge("validation", END);
 
   return graph.compile();
 }
@@ -409,6 +574,9 @@ export async function runBafBrain(userId: string): Promise<Rescue> {
     rankedContent: [],
     previousSuggestions: [],
     recentPlatforms: [],
+    blacklistedPlatforms: [],
+    categoryWeights: {},
+    semanticMatches: [],
     finalRescue: null,
     error: null,
   });

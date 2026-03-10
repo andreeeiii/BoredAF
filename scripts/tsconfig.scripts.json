@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es2020",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "strict": true,
+    "outDir": "./dist",
+    "baseUrl": "../src",
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": ["./*.ts"]
+}

@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { nudgePersonaVector } from "./embeddings";
 
 export interface Persona {
   profile: {
@@ -6,6 +7,7 @@ export interface Persona {
     username: string;
     bio: string | null;
     archetype: string;
+    persona_embedding: number[] | null;
   };
   stats: Record<string, Record<string, unknown>>;
   interests: Array<{
@@ -17,8 +19,10 @@ export interface Persona {
     suggestion: string;
     outcome: "accepted" | "rejected";
     reason: string | null;
+    source?: string | null;
     created_at: string;
   }>;
+  blacklistedPlatforms: string[];
 }
 
 export interface Feedback {
@@ -30,7 +34,7 @@ export interface Feedback {
 }
 
 export async function getPersona(userId: string): Promise<Persona> {
-  const [profileRes, statsRes, interestsRes, historyRes] = await Promise.all([
+  const [profileRes, statsRes, interestsRes, historyRes, blacklistRes] = await Promise.all([
     supabase.from("profiles").select("*").eq("id", userId).single(),
     supabase.from("persona_stats").select("*").eq("user_id", userId),
     supabase
@@ -44,6 +48,12 @@ export async function getPersona(userId: string): Promise<Persona> {
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(10),
+    supabase
+      .from("persona_stats")
+      .select("value")
+      .eq("user_id", userId)
+      .eq("category", "platform_blacklist")
+      .single(),
   ]);
 
   if (profileRes.error) throw new Error(profileRes.error.message);
@@ -53,8 +63,25 @@ export async function getPersona(userId: string): Promise<Persona> {
     stats[row.category] = row.value as Record<string, unknown>;
   }
 
+  const now = Date.now();
+  const BLACKLIST_DURATION_MS = 30 * 60 * 1000;
+  const rawBlacklist = (blacklistRes.data?.value as { entries?: Array<{ platform: string; until: string }> })?.entries ?? [];
+  const blacklistedPlatforms = rawBlacklist
+    .filter((e) => new Date(e.until).getTime() > now)
+    .map((e) => e.platform);
+
+  if (blacklistedPlatforms.length > 0) {
+    console.log(`[BAF] Active platform blacklist: [${blacklistedPlatforms.join(", ")}]`);
+  }
+
+  const rawEmbedding = profileRes.data.persona_embedding as string | null;
+  const personaEmbedding = rawEmbedding ? parseEmbeddingString(rawEmbedding) : null;
+
   return {
-    profile: profileRes.data,
+    profile: {
+      ...profileRes.data,
+      persona_embedding: personaEmbedding,
+    },
     stats,
     interests: (interestsRes.data ?? []).map((i) => ({
       platform: i.platform,
@@ -65,8 +92,10 @@ export async function getPersona(userId: string): Promise<Persona> {
       suggestion: h.suggestion,
       outcome: h.outcome as "accepted" | "rejected",
       reason: h.reason,
+      source: h.source ?? null,
       created_at: h.created_at,
     })),
+    blacklistedPlatforms,
   };
 }
 
@@ -85,40 +114,80 @@ export async function updatePersona(
 
   if (historyError) throw new Error(historyError.message);
 
-  if (feedback.outcome === "rejected" && feedback.reason) {
-    const { data: interests } = await supabase
-      .from("interests")
-      .select("*")
-      .eq("user_id", userId);
+  nudgePersonaVector(
+    userId,
+    feedback.suggestion,
+    feedback.outcome === "accepted" ? "toward" : "away"
+  ).catch((err) =>
+    console.error("[BAF][VectorFeedback] Non-blocking error:", err)
+  );
 
-    for (const interest of interests ?? []) {
-      if (
-        feedback.suggestion
-          .toLowerCase()
-          .includes(interest.platform.toLowerCase())
-      ) {
-        const newWeight = Math.max(1, interest.weight - 1);
-        await supabase
-          .from("interests")
-          .update({ weight: newWeight })
-          .eq("user_id", userId)
-          .eq("platform", interest.platform)
-          .eq("ref_id", interest.ref_id);
-      }
+  if (feedback.outcome === "rejected") {
+    const rejectedPlatform = feedback.source ?? null;
+
+    if (rejectedPlatform && rejectedPlatform !== "fallback" && rejectedPlatform !== "custom") {
+      const BLACKLIST_DURATION_MS = 30 * 60 * 1000;
+      const until = new Date(Date.now() + BLACKLIST_DURATION_MS).toISOString();
+
+      const { data: existing } = await supabase
+        .from("persona_stats")
+        .select("value")
+        .eq("user_id", userId)
+        .eq("category", "platform_blacklist")
+        .single();
+
+      const currentEntries = (existing?.value as { entries?: Array<{ platform: string; until: string }> })?.entries ?? [];
+      const filtered = currentEntries.filter((e) => new Date(e.until).getTime() > Date.now());
+      filtered.push({ platform: rejectedPlatform, until });
+
+      await supabase.from("persona_stats").upsert(
+        {
+          user_id: userId,
+          category: "platform_blacklist",
+          value: { entries: filtered },
+          last_updated: new Date().toISOString(),
+        },
+        { onConflict: "user_id,category" }
+      );
+
+      console.log(`[BAF] Blacklisted "${rejectedPlatform}" for 30 minutes (until ${until})`);
     }
 
-    if (feedback.reason === "too tired") {
-      await supabase
-        .from("persona_stats")
-        .upsert(
-          {
-            user_id: userId,
-            category: "energy_level",
-            value: { current: "low" },
-            last_updated: new Date().toISOString(),
-          },
-          { onConflict: "user_id,category" }
-        );
+    if (feedback.reason) {
+      const { data: interests } = await supabase
+        .from("interests")
+        .select("*")
+        .eq("user_id", userId);
+
+      for (const interest of interests ?? []) {
+        if (
+          feedback.suggestion
+            .toLowerCase()
+            .includes(interest.platform.toLowerCase())
+        ) {
+          const newWeight = Math.max(1, interest.weight - 1);
+          await supabase
+            .from("interests")
+            .update({ weight: newWeight })
+            .eq("user_id", userId)
+            .eq("platform", interest.platform)
+            .eq("ref_id", interest.ref_id);
+        }
+      }
+
+      if (feedback.reason === "too tired") {
+        await supabase
+          .from("persona_stats")
+          .upsert(
+            {
+              user_id: userId,
+              category: "energy_level",
+              value: { current: "low" },
+              last_updated: new Date().toISOString(),
+            },
+            { onConflict: "user_id,category" }
+          );
+      }
     }
   }
 
@@ -143,6 +212,17 @@ export async function updatePersona(
           .eq("ref_id", interest.ref_id);
       }
     }
+  }
+}
+
+function parseEmbeddingString(raw: string): number[] | null {
+  try {
+    if (typeof raw === "string" && raw.startsWith("[")) {
+      return JSON.parse(raw) as number[];
+    }
+    return null;
+  } catch {
+    return null;
   }
 }
 

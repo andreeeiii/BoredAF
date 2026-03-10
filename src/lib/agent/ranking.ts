@@ -2,9 +2,10 @@ import type { Archetype } from "../mood";
 import type { YouTubeResult } from "../tools/registry";
 import type { ChessResult } from "../tools/registry";
 import type { TwitchResult, TikTokResult } from "../tools/socialTools";
+import type { SemanticMatch } from "../embeddings";
 
 export interface RankedItem {
-  platform: "youtube" | "twitch" | "tiktok" | "chess";
+  platform: "youtube" | "twitch" | "tiktok" | "chess" | "semantic";
   title: string;
   url: string;
   score: number;
@@ -19,11 +20,21 @@ export interface RankingInput {
   tiktok: TikTokResult | null;
 }
 
+export interface HistoryEntry {
+  suggestion: string;
+  outcome: "accepted" | "rejected";
+  source?: string | null;
+}
+
 export function rankContent(
   tools: RankingInput,
   archetype: Archetype,
   recentPlatforms: string[],
-  previousSuggestions: string[]
+  previousSuggestions: string[],
+  recentHistory: HistoryEntry[] = [],
+  blacklistedPlatforms: string[] = [],
+  categoryWeights: Record<string, number> = {},
+  semanticMatches: SemanticMatch[] = []
 ): RankedItem[] {
   const items: RankedItem[] = [];
 
@@ -72,6 +83,18 @@ export function rankContent(
       score: 25,
       isLive: false,
       metadata: { currentElo: tools.chess.currentElo },
+    });
+  }
+
+  for (const match of semanticMatches) {
+    const semanticScore = Math.round(35 * match.similarity);
+    items.push({
+      platform: "semantic",
+      title: match.content_text,
+      url: "",
+      score: semanticScore,
+      isLive: false,
+      metadata: { category: match.category, similarity: match.similarity, poolId: match.id },
     });
   }
 
@@ -126,7 +149,35 @@ export function rankContent(
     if (isDuplicate) {
       item.score -= 100;
     }
+
+    const last5Sources = recentHistory.slice(0, 5).map((h) => h.source ?? "");
+    const categoryCount = last5Sources.filter((s) => s === item.platform).length;
+    if (categoryCount >= 3) {
+      const penalty = Math.round(item.score * 0.8);
+      console.log(`[BAF][Cooldown] "${item.platform}" appeared ${categoryCount}/5 recent — score ${item.score} → ${item.score - penalty} (-80%)`);
+      item.score -= penalty;
+    }
+
+    if (blacklistedPlatforms.includes(item.platform)) {
+      console.log(`[BAF][Blacklist] "${item.platform}" is blacklisted — score ${item.score} → -999`);
+      item.score = -999;
+    }
+
+    const weight = categoryWeights[item.platform] ?? 1.0;
+    if (weight < 1.0) {
+      const before = item.score;
+      item.score = Math.round(item.score * weight);
+      console.log(`[BAF][CircuitBreaker] "${item.platform}" weight=${Math.round(weight * 100)}% — score ${before} → ${item.score}`);
+    }
+
+    const lastPlatform = recentPlatforms[0];
+    if (lastPlatform && lastPlatform === item.platform) {
+      console.log(`[BAF][StrictRotation] "${item.platform}" was last suggested — penalty -60`);
+      item.score -= 60;
+    }
   }
 
-  return items.sort((a, b) => b.score - a.score);
+  const sorted = items.sort((a, b) => b.score - a.score);
+  console.log(`[BAF][Ranking] Final scores: ${sorted.map((i) => `${i.platform}:${i.score}`).join(", ")}`);
+  return sorted;
 }

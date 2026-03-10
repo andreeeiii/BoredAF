@@ -19,6 +19,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ complete });
     }
 
+    if (action === "reset") {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      );
+
+      await Promise.all([
+        sb.from("persona_stats").delete().eq("user_id", userId),
+        sb.from("interests").delete().eq("user_id", userId),
+        sb.from("baf_history").delete().eq("user_id", userId),
+      ]);
+
+      await sb
+        .from("profiles")
+        .update({ archetype: null })
+        .eq("id", userId);
+
+      return NextResponse.json({ success: true, message: "User reset — ready to re-onboard" });
+    }
+
     if (action === "submit") {
       const answers = body.answers as OnboardingAnswer[];
 

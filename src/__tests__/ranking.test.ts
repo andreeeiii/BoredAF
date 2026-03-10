@@ -156,4 +156,185 @@ describe("rankContent", () => {
     expect(liveItems.length).toBe(1);
     expect(liveItems[0].platform).toBe("twitch");
   });
+
+  it("sets blacklisted platform score to -999", () => {
+    const items = rankContent(
+      baseTools,
+      "The Grind",
+      [],
+      [],
+      [],
+      ["chess"]
+    );
+    const chess = items.find((i) => i.platform === "chess");
+    expect(chess).toBeDefined();
+    expect(chess!.score).toBe(-999);
+  });
+
+  it("applies category cooldown (-80%) when platform appears 3+ in last 5 history", () => {
+    const history = [
+      { suggestion: "s1", outcome: "rejected" as const, source: "chess" },
+      { suggestion: "s2", outcome: "rejected" as const, source: "chess" },
+      { suggestion: "s3", outcome: "rejected" as const, source: "chess" },
+    ];
+    const items = rankContent(
+      baseTools,
+      "The Grind",
+      [],
+      [],
+      history,
+      []
+    );
+    const chess = items.find((i) => i.platform === "chess");
+    expect(chess).toBeDefined();
+    // Base 25 + Grind +30 = 55, then -80% = 55 - 44 = 11
+    expect(chess!.score).toBeLessThan(20);
+  });
+
+  it("applies circuit breaker category weights to reduce scores", () => {
+    const items = rankContent(
+      baseTools,
+      "The Chill",
+      [],
+      [],
+      [],
+      [],
+      { chess: 0, youtube: 0.3, twitch: 1.0, tiktok: 1.0 }
+    );
+    const chess = items.find((i) => i.platform === "chess");
+    const youtube = items.find((i) => i.platform === "youtube");
+    const twitch = items.find((i) => i.platform === "twitch" && i.isLive);
+    expect(chess!.score).toBe(0);
+    expect(youtube!.score).toBeLessThan(15);
+    expect(twitch!.score).toBeGreaterThan(50);
+  });
+
+  it("applies strict rotation penalty (-60) when platform matches last suggested", () => {
+    const items = rankContent(
+      baseTools,
+      "The Spark",
+      ["chess"],
+      [],
+      [],
+      []
+    );
+    const chess = items.find((i) => i.platform === "chess");
+    expect(chess).toBeDefined();
+    // Base 25, then Spark adjustments, then -60 for strict rotation
+    expect(chess!.score).toBeLessThan(0);
+  });
+
+  it("does not penalize platforms that were NOT the last suggested", () => {
+    const items = rankContent(
+      baseTools,
+      "The Chill",
+      ["chess"],
+      [],
+      [],
+      []
+    );
+    const twitch = items.find((i) => i.platform === "twitch" && i.isLive);
+    expect(twitch).toBeDefined();
+    // Live twitch for Chill = 60 + 50 + 20 = 130, no rotation penalty
+    expect(twitch!.score).toBeGreaterThanOrEqual(100);
+  });
+});
+
+describe("Semantic Ranking", () => {
+  const semanticMatches = [
+    { id: "s1", content_text: "Learn to juggle with 3 items", category: "physical", similarity: 0.85 },
+    { id: "s2", content_text: "Try a 5-min plank challenge", category: "physical", similarity: 0.72 },
+    { id: "s3", content_text: "Write a haiku about your mood", category: "creative", similarity: 0.60 },
+  ];
+
+  it("scores semantic matches with base 35 * similarity", () => {
+    const items = rankContent(
+      baseTools,
+      "The Spark",
+      [],
+      [],
+      [],
+      [],
+      {},
+      semanticMatches
+    );
+    const semanticItems = items.filter((i) => i.platform === "semantic");
+    expect(semanticItems.length).toBe(3);
+
+    const juggle = semanticItems.find((i) => i.title.includes("juggle"));
+    expect(juggle).toBeDefined();
+    // 35 * 0.85 = 29.75 → round to 30
+    expect(juggle!.score).toBe(Math.round(35 * 0.85));
+  });
+
+  it("ranks semantic matches alongside platform content by score", () => {
+    const items = rankContent(
+      baseTools,
+      "The Chill",
+      [],
+      [],
+      [],
+      [],
+      {},
+      semanticMatches
+    );
+    // Semantic items should be interleaved with platform items by score
+    expect(items.length).toBeGreaterThan(semanticMatches.length);
+    // Items should be sorted descending
+    for (let i = 1; i < items.length; i++) {
+      expect(items[i - 1].score).toBeGreaterThanOrEqual(items[i].score);
+    }
+  });
+
+  it("semantic items have empty url and semantic platform", () => {
+    const items = rankContent(
+      baseTools,
+      "The Spark",
+      [],
+      [],
+      [],
+      [],
+      {},
+      semanticMatches
+    );
+    const semanticItems = items.filter((i) => i.platform === "semantic");
+    for (const item of semanticItems) {
+      expect(item.url).toBe("");
+      expect(item.isLive).toBe(false);
+      expect(item.metadata).toHaveProperty("category");
+      expect(item.metadata).toHaveProperty("similarity");
+    }
+  });
+
+  it("semantic items are not affected by circuit breaker weights for other platforms", () => {
+    const items = rankContent(
+      baseTools,
+      "The Spark",
+      [],
+      [],
+      [],
+      [],
+      { youtube: 0.3, chess: 0, semantic: 1.0 },
+      semanticMatches
+    );
+    const semanticItems = items.filter((i) => i.platform === "semantic");
+    const juggle = semanticItems.find((i) => i.title.includes("juggle"));
+    // semantic weight = 1.0, so score unchanged: round(35 * 0.85) = 30
+    expect(juggle!.score).toBe(Math.round(35 * 0.85));
+  });
+
+  it("works with empty semantic matches", () => {
+    const items = rankContent(
+      baseTools,
+      "The Spark",
+      [],
+      [],
+      [],
+      [],
+      {},
+      []
+    );
+    const semanticItems = items.filter((i) => i.platform === "semantic");
+    expect(semanticItems.length).toBe(0);
+  });
 });

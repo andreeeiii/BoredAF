@@ -15,18 +15,21 @@ export interface Database {
           username: string;
           bio: string | null;
           archetype: string;
+          persona_embedding: string | null;
         };
         Insert: {
           id?: string;
           username: string;
           bio?: string | null;
           archetype?: string;
+          persona_embedding?: string | null;
         };
         Update: {
           id?: string;
           username?: string;
           bio?: string | null;
           archetype?: string;
+          persona_embedding?: string | null;
         };
         Relationships: [];
       };
@@ -65,18 +68,21 @@ export interface Database {
           platform: string;
           ref_id: string;
           weight: number;
+          embedding: string | null;
         };
         Insert: {
           user_id: string;
           platform: string;
           ref_id: string;
           weight?: number;
+          embedding?: string | null;
         };
         Update: {
           user_id?: string;
           platform?: string;
           ref_id?: string;
           weight?: number;
+          embedding?: string | null;
         };
         Relationships: [
           {
@@ -97,6 +103,7 @@ export interface Database {
           reason: string | null;
           archetype: string | null;
           source: string | null;
+          embedding: string | null;
           created_at: string;
         };
         Insert: {
@@ -107,6 +114,7 @@ export interface Database {
           reason?: string | null;
           archetype?: string | null;
           source?: string | null;
+          embedding?: string | null;
           created_at?: string;
         };
         Update: {
@@ -117,6 +125,7 @@ export interface Database {
           reason?: string | null;
           archetype?: string | null;
           source?: string | null;
+          embedding?: string | null;
           created_at?: string;
         };
         Relationships: [
@@ -129,12 +138,57 @@ export interface Database {
           },
         ];
       };
+      suggestion_pool: {
+        Row: {
+          id: string;
+          content_text: string;
+          category: string;
+          embedding: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          content_text: string;
+          category: string;
+          embedding?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          content_text?: string;
+          category?: string;
+          embedding?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
     };
     Functions: {
-      [_ in never]: never;
+      match_suggestions: {
+        Args: {
+          query_embedding: string;
+          match_count?: number;
+          match_threshold?: number;
+        };
+        Returns: Array<{
+          id: string;
+          content_text: string;
+          category: string;
+          similarity: number;
+        }>;
+      };
+      nudge_persona_embedding: {
+        Args: {
+          p_user_id: string;
+          suggestion_emb: string;
+          learning_rate?: number;
+          direction?: number;
+        };
+        Returns: undefined;
+      };
     };
     Enums: {
       [_ in never]: never;

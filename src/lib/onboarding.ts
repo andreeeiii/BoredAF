@@ -2,6 +2,7 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import { z } from "zod";
 import { supabase } from "./supabase";
 import { mapToArchetype } from "./mood";
+import { buildPersonaText, generateAndStorePersonaEmbedding } from "./embeddings";
 
 export const PersonaMappingSchema = z.object({
   archetype: z.string(),
@@ -164,6 +165,16 @@ export async function saveOnboardingResult(
       { onConflict: "user_id,platform,ref_id" }
     );
   }
+
+  const personaText = buildPersonaText({
+    archetype: coreArchetype,
+    tags: mapping.tags,
+    energy: mapping.personaData.energy,
+    focus: mapping.personaData.focus,
+    interests: mapping.extractedInterests,
+  });
+
+  await generateAndStorePersonaEmbedding(userId, personaText);
 }
 
 export async function isOnboardingComplete(userId: string): Promise<boolean> {
