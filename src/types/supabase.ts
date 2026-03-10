@@ -25,6 +25,7 @@ export interface Database {
           username?: string;
           bio?: string | null;
         };
+        Relationships: [];
       };
       persona_stats: {
         Row: {
@@ -45,6 +46,15 @@ export interface Database {
           value?: Json;
           last_updated?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: "persona_stats_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       interests: {
         Row: {
@@ -65,6 +75,15 @@ export interface Database {
           ref_id?: string;
           weight?: number;
         };
+        Relationships: [
+          {
+            foreignKeyName: "interests_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       baf_history: {
         Row: {
@@ -91,6 +110,15 @@ export interface Database {
           reason?: string | null;
           created_at?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: "baf_history_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
     };
     Views: {
@@ -100,6 +128,9 @@ export interface Database {
       [_ in never]: never;
     };
     Enums: {
+      [_ in never]: never;
+    };
+    CompositeTypes: {
       [_ in never]: never;
     };
   };

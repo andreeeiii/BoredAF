@@ -1,5 +1,11 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import BafButton from "@/app/components/BafButton";
+
+global.fetch = jest.fn();
+
+beforeEach(() => {
+  (global.fetch as jest.Mock).mockReset();
+});
 
 describe("BafButton", () => {
   it("renders with BAF text in idle state", () => {
@@ -9,38 +15,75 @@ describe("BafButton", () => {
     expect(button).toHaveTextContent("BAF");
   });
 
-  it("is not disabled in idle state", () => {
-    render(<BafButton />);
-    const button = screen.getByRole("button", { name: /get a suggestion/i });
-    expect(button).not.toBeDisabled();
-  });
-
   it("transitions to thinking state on click", () => {
+    (global.fetch as jest.Mock).mockImplementation(
+      () => new Promise(() => {})
+    );
     render(<BafButton />);
     const button = screen.getByRole("button", { name: /get a suggestion/i });
     fireEvent.click(button);
-    const thinkingButton = screen.getByRole("button", { name: /loading suggestion/i });
-    expect(thinkingButton).toHaveTextContent("Thinking...");
-    expect(thinkingButton).toBeDisabled();
+    expect(screen.getByText("Thinking...")).toBeInTheDocument();
   });
 
-  it("shows cancel button in thinking state", () => {
+  it("shows suggestion after API response", async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        suggestion: "Watch a chess video",
+        emoji: "♟️",
+        vibe: "chill",
+        source: "youtube",
+      }),
+    });
+
     render(<BafButton />);
     fireEvent.click(screen.getByRole("button", { name: /get a suggestion/i }));
-    expect(screen.getByText("Cancel")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText("Watch a chess video")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/LFG/)).toBeInTheDocument();
+    expect(screen.getByText(/Nah/)).toBeInTheDocument();
   });
 
-  it("returns to idle state when cancel is clicked", () => {
+  it("shows why menu when Nah is clicked", async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        suggestion: "Play blitz",
+        emoji: "♟️",
+        vibe: "active",
+        source: "chess",
+      }),
+    });
+
     render(<BafButton />);
     fireEvent.click(screen.getByRole("button", { name: /get a suggestion/i }));
-    fireEvent.click(screen.getByText("Cancel"));
-    const button = screen.getByRole("button", { name: /get a suggestion/i });
-    expect(button).toHaveTextContent("BAF");
-    expect(button).not.toBeDisabled();
+
+    await waitFor(() => {
+      expect(screen.getByText("Play blitz")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText(/Nah/));
+
+    expect(screen.getByText("Why not?")).toBeInTheDocument();
+    expect(screen.getByText("Too tired")).toBeInTheDocument();
+    expect(screen.getByText("Not interested")).toBeInTheDocument();
   });
 
-  it("does not show cancel button in idle state", () => {
+  it("returns to idle on error", async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+    });
+
     render(<BafButton />);
-    expect(screen.queryByText("Cancel")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /get a suggestion/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /get a suggestion/i })
+      ).toBeInTheDocument();
+    });
   });
 });
