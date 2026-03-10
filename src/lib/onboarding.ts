@@ -178,9 +178,13 @@ export async function saveOnboardingResult(
   await generateAndStorePersonaEmbedding(userId, personaText);
 
   if (answers.length > 0) {
-    seedPoolFromOnboarding(answers, mapping).catch((err) =>
-      console.error("[BAF][OnboardingSeed] Non-blocking error:", err)
-    );
+    console.log("[BAF][OnboardingSeed] Starting personalized pool seeding...");
+    try {
+      const count = await seedPoolFromOnboarding(answers, mapping);
+      console.log(`[BAF][OnboardingSeed] Completed: ${count} personalized entries added`);
+    } catch (err) {
+      console.error("[BAF][OnboardingSeed] Error during seeding:", err);
+    }
   }
 }
 

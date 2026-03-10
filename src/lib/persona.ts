@@ -74,20 +74,16 @@ export async function getPersona(userId: string): Promise<Persona> {
   }
 
   const now = Date.now();
-  const BLACKLIST_DURATION_MS = 30 * 60 * 1000;
-  const rawBlacklist = (blacklistRes.data?.value as { entries?: Array<{ platform: string; until: string }> })?.entries ?? [];
-  const blacklistedPlatforms = rawBlacklist
-    .filter((e) => new Date(e.until).getTime() > now)
-    .map((e) => e.platform);
+
+  // No platform-level blacklist — rejecting one item should NOT block the entire platform.
+  // The vector nudge + item blacklist + circuit breaker handle deprioritization naturally.
+  const blacklistedPlatforms: string[] = [];
 
   const rawItemBlacklist = (itemBlacklistRes.data?.value as { entries?: Array<{ url: string; until: string }> })?.entries ?? [];
   const blacklistedItems = rawItemBlacklist
     .filter((e) => new Date(e.until).getTime() > now)
     .map((e) => e.url);
 
-  if (blacklistedPlatforms.length > 0) {
-    console.log(`[BAF] Active platform blacklist: [${blacklistedPlatforms.join(", ")}]`);
-  }
   if (blacklistedItems.length > 0) {
     console.log(`[BAF] Active item blacklist (${blacklistedItems.length} items): [${blacklistedItems.slice(0, 3).join(", ")}${blacklistedItems.length > 3 ? "..." : ""}]`);
   }
@@ -151,35 +147,9 @@ export async function updatePersona(
   }
 
   if (feedback.outcome === "rejected") {
-    const rejectedPlatform = feedback.source ?? null;
-
-    if (rejectedPlatform && rejectedPlatform !== "fallback" && rejectedPlatform !== "custom") {
-      const BLACKLIST_DURATION_MS = 30 * 60 * 1000;
-      const until = new Date(Date.now() + BLACKLIST_DURATION_MS).toISOString();
-
-      const { data: existing } = await supabase
-        .from("persona_stats")
-        .select("value")
-        .eq("user_id", userId)
-        .eq("category", "platform_blacklist")
-        .single();
-
-      const currentEntries = (existing?.value as { entries?: Array<{ platform: string; until: string }> })?.entries ?? [];
-      const filtered = currentEntries.filter((e) => new Date(e.until).getTime() > Date.now());
-      filtered.push({ platform: rejectedPlatform, until });
-
-      await supabase.from("persona_stats").upsert(
-        {
-          user_id: userId,
-          category: "platform_blacklist",
-          value: { entries: filtered },
-          last_updated: new Date().toISOString(),
-        },
-        { onConflict: "user_id,category" }
-      );
-
-      console.log(`[BAF] Blacklisted platform "${rejectedPlatform}" for 30 minutes (until ${until})`);
-    }
+    // NOTE: No platform-level blacklist — rejecting a single item should NOT block
+    // the entire platform. The vector nudge (persona shifts away from rejected content)
+    // and item-level blacklist handle deprioritization naturally.
 
     const rejectedUrl = feedback.link ?? null;
     if (rejectedUrl) {

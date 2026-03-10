@@ -82,8 +82,7 @@ The Brain doesn't just use the stored archetype — it uses a **real-time mood o
 - **Tired signals**: "Too tired" rejection reason → temporarily The Chill for 1 hour
 - **Platform rotation**: Never suggest the same platform 3 times in a row
 - **Circuit Breaker**: 1 Nah → -70% weight for that category; 2 consecutive Nahs → 0% (total lock for session)
-- **30-min Platform Blacklist**: Rejected platform stored in `persona_stats` JSONB, enforced as score = -999 for 30 minutes
-- **60-min Item Blacklist**: Rejected specific items (by URL) stored in `persona_stats` JSONB, enforced as score = -999 for 60 minutes — prevents the same TikTok creator or Twitch streamer from returning after rejection
+- **60-min Item Blacklist**: Rejected specific items (by URL) stored in `persona_stats` JSONB, enforced as score = -999 for 60 minutes — prevents the same TikTok creator or Twitch streamer from returning after rejection. No platform-level blacklist — rejecting one YouTube video does NOT block all YouTube.
 - **Graduated Rotation**: Last platform = -60, 2nd-last = -30, 3rd-last = -15 — creates a spreading effect that naturally mixes platforms
 
 ## Content Source: suggestion_pool (Vector DB)
@@ -124,8 +123,7 @@ After fetching, a **ranking node** scores each piece of content:
 - **Duplicate penalty**: -100 if content URL matches any previous suggestion's URL (URL-based, not text-based)
 - **Category Cooldown**: -80% if platform appeared 3+ times in last 5 history entries
 - **Circuit Breaker Weights**: Score × category weight (0.0–1.0 based on rejection history)
-- **Platform Blacklist**: Score = -999 for platforms rejected in last 30 minutes
-- **Item Blacklist**: Score = -999 for specific URLs rejected in last 60 minutes
+- **Item Blacklist**: Score = -999 for specific URLs rejected in last 60 minutes (no platform-level blacklist)
 - **Graduated Rotation**: -60 for last platform, -30 for 2nd-last, -15 for 3rd-last
 - **Weighted Randomization**: Top-3 items shuffled by weighted random (higher score = higher probability, not guaranteed)
 
@@ -158,7 +156,7 @@ AI parses answers → maps to archetype + extracts interest tags + populates DB.
 - **Archetype-Based Reasoning**: Different strategies for Grind/Chill/Spark users
 - **Mood Sensor**: Time-of-day, energy, rejection streaks dynamically shift archetype
 - **Circuit Breaker**: Category weights drop on rejection (1 Nah = -70%, 2 consecutive = locked at 0%)
-- **30-Min Platform Blacklist**: Rejected platform banned for 30 minutes via `persona_stats` JSONB
+- **Item-Level Blacklist**: Rejected specific URLs banned for 60 minutes — no platform-level blocking
 - **Strict Rotation**: -60 penalty prevents same platform twice in a row
 - **Persona-First Validation**: LangGraph validation node discards suggestions not matching user interests
 - **Weighted Randomization**: Top-3 picks shuffled by weighted random to prevent "mathematical winner" always winning
