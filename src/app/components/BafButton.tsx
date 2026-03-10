@@ -27,7 +27,7 @@ export default function BafButton() {
         `}
         aria-label={state === "idle" ? "Get a suggestion" : "Loading suggestion"}
       >
-        {state === "idle" ? "BAF ME" : "Thinking..."}
+        {state === "idle" ? "BAF" : "Thinking..."}
       </button>
       {state === "thinking" && (
         <button

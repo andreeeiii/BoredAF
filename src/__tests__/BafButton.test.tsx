@@ -2,11 +2,11 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import BafButton from "@/app/components/BafButton";
 
 describe("BafButton", () => {
-  it("renders with BAF ME text in idle state", () => {
+  it("renders with BAF text in idle state", () => {
     render(<BafButton />);
     const button = screen.getByRole("button", { name: /get a suggestion/i });
     expect(button).toBeInTheDocument();
-    expect(button).toHaveTextContent("BAF ME");
+    expect(button).toHaveTextContent("BAF");
   });
 
   it("is not disabled in idle state", () => {
@@ -35,7 +35,7 @@ describe("BafButton", () => {
     fireEvent.click(screen.getByRole("button", { name: /get a suggestion/i }));
     fireEvent.click(screen.getByText("Cancel"));
     const button = screen.getByRole("button", { name: /get a suggestion/i });
-    expect(button).toHaveTextContent("BAF ME");
+    expect(button).toHaveTextContent("BAF");
     expect(button).not.toBeDisabled();
   });
 
