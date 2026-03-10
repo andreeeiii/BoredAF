@@ -165,7 +165,7 @@ async function rankingNode(
     source: h.source,
   }));
 
-  const ranked = rankContent(
+  const allRanked = rankContent(
     state.poolSuggestions ?? [],
     state.liveStreams ?? [],
     state.mood.effectiveArchetype,
@@ -176,6 +176,13 @@ async function rankingNode(
     state.blacklistedItems ?? [],
     state.categoryWeights ?? {}
   );
+
+  // Remove blacklisted items entirely so no downstream node can pick them
+  const ranked = allRanked.filter((item) => item.score > -900);
+  const removed = allRanked.length - ranked.length;
+  if (removed > 0) {
+    console.log(`[BAF][Ranking] Filtered out ${removed} blacklisted items from results`);
+  }
 
   return { rankedContent: ranked };
 }
@@ -492,10 +499,18 @@ async function validationNode(
   console.log(`[BAF][Validation] FAIL — "${rescue.source}" not in user interests [${userPlatforms.join(", ")}]. Re-rolling...`);
 
   const ranked = state.rankedContent ?? [];
-  const matchingItem = ranked.find((r) =>
-    userPlatforms.includes(r.platform) ||
-    (r.platform === "chess" && userPlatforms.some((p) => p === "chess" || p === "game"))
-  );
+  const previousSuggestions = state.previousSuggestions ?? [];
+  const matchingItem = ranked.find((r) => {
+    const platformMatch = userPlatforms.includes(r.platform) ||
+      (r.platform === "chess" && userPlatforms.some((p) => p === "chess" || p === "game"));
+    if (!platformMatch) return false;
+    // Skip items that were recently shown (prevents re-suggesting rejected items)
+    const wasRecentlyShown = previousSuggestions.some((prev) =>
+      prev.toLowerCase().includes(r.title.toLowerCase().slice(0, 20)) ||
+      r.title.toLowerCase().includes(prev.toLowerCase().slice(0, 20))
+    );
+    return !wasRecentlyShown;
+  });
 
   if (matchingItem) {
     const base: Rescue = {
