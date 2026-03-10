@@ -295,15 +295,16 @@ Their EXACT onboarding answers (READ CAREFULLY):
 ${answersText}
 
 CRITICAL RULES:
-1. If the user mentions SPECIFIC creators, influencers, or people by name → include those EXACT people AND 5-10 similar creators from the SAME niche/country/language
-2. If the user mentions a country or culture (e.g. "Greek") → suggest REAL creators from that country who actually post in that language or about that culture
-3. Every suggestion with a platform must have a REAL URL: YouTube → https://youtube.com/@RealChannelName, Twitch → https://twitch.tv/realusername, TikTok → https://tiktok.com/@realusername
-4. Format: "CreatorName — short description of what they do" (e.g. "Agadmator — chess analysis with storytelling")
-5. Do NOT write generic descriptions like "Explore Greek culture" — use REAL creator names
-6. Max 3 general activity suggestions (no URL), the rest MUST be real creators
-7. At least 10 out of 15 should be directly related to what the user said in their answers
+1. If the user mentions SPECIFIC creators by name → include those EXACT people AND 5-10 similar creators from the SAME niche/country/language
+2. If the user mentions a country or culture (e.g. "Greek") → suggest REAL well-known creators from that country
+3. ONLY suggest creators you are CONFIDENT are real and popular (100K+ followers). Use their EXACT known handle for the URL.
+4. If a creator's exact handle is uncertain, use their most commonly known channel name
+5. Format: "CreatorName — short description" (e.g. "Agadmator — chess analysis with storytelling")
+6. Do NOT write generic descriptions — use REAL creator names only
+7. Max 3 general activity suggestions (no URL), the rest MUST be real verified creators
+8. Include "followers_approx" — your best estimate of their follower/subscriber count
 
-Return ONLY a JSON array: [{"text": "CreatorName — what they do (under 60 chars)", "platform": "youtube|twitch|tiktok|chess|general", "url": "https://real-url", "category": "influencer|gaming|creative|physical|learning|music|adventure|general"}]`,
+Return ONLY a JSON array: [{"text": "CreatorName — what they do (under 60 chars)", "platform": "youtube|twitch|tiktok|chess|general", "url": "https://exact-handle-url", "category": "influencer|gaming|creative|physical|learning|music|adventure|general", "followers_approx": 500000}]`,
         },
       ],
     });
@@ -316,8 +317,19 @@ Return ONLY a JSON array: [{"text": "CreatorName — what they do (under 60 char
 
     if (!Array.isArray(parsed)) return 0;
 
+    const MIN_FOLLOWERS = 10_000;
     const valid = parsed
-      .filter((s) => s.text && s.platform && s.category)
+      .filter((s) => {
+        if (!s.text || !s.platform || !s.category) return false;
+        // General activities (no URL) don't need follower check
+        if (s.platform === "general") return true;
+        // Filter out creators with too few followers (likely wrong account)
+        if (s.followers_approx !== undefined && s.followers_approx < MIN_FOLLOWERS) {
+          console.log(`[BAF][OnboardingSeed] Filtered low-follower: "${s.text.slice(0, 40)}..." (${s.followers_approx} followers)`);
+          return false;
+        }
+        return true;
+      })
       .slice(0, 15);
 
     let inserted = 0;
@@ -354,6 +366,7 @@ export interface PoolExpansionSuggestion {
   platform: string;
   url: string;
   category: string;
+  followers_approx?: number;
 }
 
 export async function generateSimilarSuggestions(
@@ -393,13 +406,14 @@ export async function generateSimilarSuggestions(
 Generate exactly 3 similar creators/content. Format: "CreatorName — what they do".
 ${urlHint ? `URL format: ${urlHint}` : ""}
 
-Return JSON array: [{"text": "CreatorName — description under 60 chars", "platform": "${platform}", "url": "real_url", "category": "${category}"}]
+Return JSON array: [{"text": "CreatorName — description under 60 chars", "platform": "${platform}", "url": "exact_handle_url", "category": "${category}", "followers_approx": 500000}]
 
 Rules:
-- REAL creator names with REAL URLs (no made-up names)
+- ONLY suggest creators you are CONFIDENT are real and popular (100K+ followers)
+- Use their EXACT known handle/username for the URL
 - Same niche/vibe/country as the original
-- If original is a Greek creator, suggest other Greek creators
-- If original is a chess streamer, suggest other chess streamers`,
+- Include "followers_approx" — your best estimate of their follower count
+- If unsure about a creator's handle, skip them — do NOT guess`,
         },
       ],
     });
@@ -412,8 +426,16 @@ Rules:
 
     if (!Array.isArray(parsed)) return [];
 
+    const MIN_FOLLOWERS = 10_000;
     return parsed
-      .filter((s) => s.text && s.platform && s.url && s.category)
+      .filter((s) => {
+        if (!s.text || !s.platform || !s.url || !s.category) return false;
+        if (s.followers_approx !== undefined && s.followers_approx < MIN_FOLLOWERS) {
+          console.log(`[BAF][PoolExpansion] Filtered low-follower: "${s.text.slice(0, 40)}..." (${s.followers_approx})`);
+          return false;
+        }
+        return true;
+      })
       .slice(0, 3);
   } catch (err) {
     console.error("[BAF][PoolExpansion] LLM error:", err instanceof Error ? err.message : err);
@@ -489,11 +511,12 @@ Reason: "${reason}"
 
 ${hint}
 
-Generate exactly 3 ALTERNATIVE suggestions that address their rejection reason. Use any platform. Each must have a REAL URL to actual content/creators.
+Generate exactly 3 ALTERNATIVE suggestions that address their rejection reason. Format: "CreatorName — what they do".
 
-URL formats: YouTube: https://youtube.com/@Name, Twitch: https://twitch.tv/name, TikTok: https://tiktok.com/@name, General activities: empty url
+ONLY suggest creators you are CONFIDENT are real and popular (100K+ followers). Use their EXACT known handle for URLs.
+URL formats: YouTube: https://youtube.com/@ExactHandle, Twitch: https://twitch.tv/exacthandle, TikTok: https://tiktok.com/@exacthandle, General activities: empty url
 
-Return JSON array: [{"text": "short description under 60 chars", "platform": "youtube|twitch|tiktok|chess|general", "url": "real_url_or_empty", "category": "influencer|gaming|creative|physical|learning|music|adventure|general"}]`,
+Return JSON array: [{"text": "CreatorName — description under 60 chars", "platform": "youtube|twitch|tiktok|chess|general", "url": "exact_handle_url_or_empty", "category": "influencer|gaming|creative|physical|learning|music|adventure|general", "followers_approx": 500000}]`,
         },
       ],
     });
@@ -505,7 +528,18 @@ Return JSON array: [{"text": "short description under 60 chars", "platform": "yo
     const parsed = JSON.parse(cleaned) as PoolExpansionSuggestion[];
     if (!Array.isArray(parsed)) return 0;
 
-    const valid = parsed.filter((s) => s.text && s.platform && s.category).slice(0, 3);
+    const MIN_FOLLOWERS = 10_000;
+    const valid = parsed
+      .filter((s) => {
+        if (!s.text || !s.platform || !s.category) return false;
+        if (s.platform === "general") return true;
+        if (s.followers_approx !== undefined && s.followers_approx < MIN_FOLLOWERS) {
+          console.log(`[BAF][RejectExpansion] Filtered low-follower: "${s.text.slice(0, 40)}..." (${s.followers_approx})`);
+          return false;
+        }
+        return true;
+      })
+      .slice(0, 3);
     let inserted = 0;
 
     for (const s of valid) {

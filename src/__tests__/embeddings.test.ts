@@ -347,6 +347,77 @@ describe("Interest extraction on accept", () => {
   });
 });
 
+describe("Follower count filtering", () => {
+  const MIN_FOLLOWERS = 10_000;
+
+  it("filters out creators with < 10K followers", () => {
+    const raw = [
+      { text: "BigCreator — gaming", platform: "youtube", url: "https://youtube.com/@big", category: "influencer", followers_approx: 500000 },
+      { text: "SmallAccount — random", platform: "youtube", url: "https://youtube.com/@small", category: "influencer", followers_approx: 200 },
+      { text: "MediumCreator — vlogs", platform: "tiktok", url: "https://tiktok.com/@med", category: "influencer", followers_approx: 50000 },
+    ];
+
+    const valid = raw.filter((s) => {
+      if (!s.text || !s.platform || !s.category) return false;
+      if (s.platform === "general") return true;
+      if (s.followers_approx !== undefined && s.followers_approx < MIN_FOLLOWERS) return false;
+      return true;
+    });
+
+    expect(valid).toHaveLength(2);
+    expect(valid[0].text).toBe("BigCreator — gaming");
+    expect(valid[1].text).toBe("MediumCreator — vlogs");
+  });
+
+  it("allows general activities without follower check", () => {
+    const raw = [
+      { text: "Go for a walk", platform: "general", url: "", category: "physical", followers_approx: undefined },
+      { text: "TinyAccount", platform: "twitch", url: "https://twitch.tv/tiny", category: "influencer", followers_approx: 50 },
+    ];
+
+    const valid = raw.filter((s) => {
+      if (!s.text || !s.platform || !s.category) return false;
+      if (s.platform === "general") return true;
+      if (s.followers_approx !== undefined && s.followers_approx < MIN_FOLLOWERS) return false;
+      return true;
+    });
+
+    expect(valid).toHaveLength(1);
+    expect(valid[0].text).toBe("Go for a walk");
+  });
+
+  it("allows entries without followers_approx (LLM didn't provide it)", () => {
+    const raw = [
+      { text: "UnknownCreator — content", platform: "youtube", url: "https://youtube.com/@unknown", category: "influencer", followers_approx: undefined },
+    ];
+
+    const valid = raw.filter((s) => {
+      if (!s.text || !s.platform || !s.category) return false;
+      if (s.platform === "general") return true;
+      if (s.followers_approx !== undefined && s.followers_approx < MIN_FOLLOWERS) return false;
+      return true;
+    });
+
+    expect(valid).toHaveLength(1);
+  });
+
+  it("filters boundary case: exactly 10K followers passes", () => {
+    const raw = [
+      { text: "Borderline — content", platform: "youtube", url: "https://youtube.com/@border", category: "influencer", followers_approx: 10000 },
+      { text: "JustUnder — content", platform: "youtube", url: "https://youtube.com/@under", category: "influencer", followers_approx: 9999 },
+    ];
+
+    const valid = raw.filter((s) => {
+      if (!s.text || !s.platform || !s.category) return false;
+      if (s.followers_approx !== undefined && s.followers_approx < MIN_FOLLOWERS) return false;
+      return true;
+    });
+
+    expect(valid).toHaveLength(1);
+    expect(valid[0].text).toBe("Borderline — content");
+  });
+});
+
 describe("Pool mutation on every interaction", () => {
   it("expands pool on accept (3 similar suggestions)", () => {
     const maxExpansion = 3;
