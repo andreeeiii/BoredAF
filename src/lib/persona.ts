@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { nudgePersonaVector } from "./embeddings";
+import { nudgePersonaVector, updatePoolEngagement } from "./embeddings";
 
 export interface Persona {
   profile: {
@@ -33,6 +33,7 @@ export interface Feedback {
   archetype?: string;
   source?: string;
   link?: string | null;
+  poolId?: string | null;
 }
 
 export async function getPersona(userId: string): Promise<Persona> {
@@ -138,6 +139,15 @@ export async function updatePersona(
   ).catch((err) =>
     console.error("[BAF][VectorFeedback] Non-blocking error:", err)
   );
+
+  if (feedback.poolId) {
+    updatePoolEngagement(
+      feedback.poolId,
+      feedback.outcome === "accepted" ? "accepted" : "rejected"
+    ).catch((err) =>
+      console.error("[BAF][PoolEngagement] Non-blocking error:", err)
+    );
+  }
 
   if (feedback.outcome === "rejected") {
     const rejectedPlatform = feedback.source ?? null;

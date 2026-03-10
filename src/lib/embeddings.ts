@@ -108,6 +108,11 @@ export interface SemanticMatch {
   id: string;
   content_text: string;
   category: string;
+  platform: string;
+  url: string;
+  times_shown: number;
+  times_accepted: number;
+  times_rejected: number;
   similarity: number;
 }
 
@@ -158,6 +163,51 @@ export async function nudgePersonaVector(
   }
 
   console.log(`[BAF][VectorFeedback] Nudged persona ${direction} "${suggestionText.slice(0, 40)}..." (rate: ${LEARNING_RATE})`);
+}
+
+export interface PoolEntry {
+  id: string;
+  content_text: string;
+  category: string;
+  platform: string;
+  url: string;
+  times_shown: number;
+  times_accepted: number;
+  times_rejected: number;
+}
+
+export async function fetchPopularSuggestions(
+  count: number = 20
+): Promise<PoolEntry[]> {
+  const { data, error } = await supabase.rpc("fetch_popular_suggestions", {
+    fetch_count: count,
+  });
+
+  if (error) {
+    console.error("[BAF][PopularFetch] RPC error:", error.message);
+    return [];
+  }
+
+  const results = (data ?? []) as PoolEntry[];
+  console.log(`[BAF][PopularFetch] Got ${results.length} popular suggestions`);
+  return results;
+}
+
+export async function updatePoolEngagement(
+  poolId: string,
+  outcome: "shown" | "accepted" | "rejected"
+): Promise<void> {
+  const { error } = await supabase.rpc("update_pool_engagement", {
+    p_pool_id: poolId,
+    p_outcome: outcome,
+  });
+
+  if (error) {
+    console.error(`[BAF][PoolEngagement] Failed to update ${outcome} for ${poolId}:`, error.message);
+    return;
+  }
+
+  console.log(`[BAF][PoolEngagement] Updated ${outcome} for pool entry ${poolId}`);
 }
 
 export async function embedSuggestionPoolEntry(

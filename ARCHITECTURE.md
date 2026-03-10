@@ -18,7 +18,7 @@ BAF is an AI-powered anti-boredom app. The user presses the **BAF** button when 
 | **The Chill** | Relaxation | Long-form video essays, Twitch streams, fashion lookbooks. Low-effort only. |
 | **The Spark** | Novelty | Random Wikipedia, new hobbies, "chaos" mode. Least-used platform first. |
 
-## Architecture
+## Architecture (Vector-First)
 
 ```
 [ USER ]
@@ -27,28 +27,27 @@ BAF is an AI-powered anti-boredom app. The user presses the **BAF** button when 
    │
 ┌──────────────────────────────────────────────────────────────┐
 │                    (2) THE BRAIN (LangGraph)                  │
-│  Context → Parallel Fetch → Ranking → Reasoning → Validation │
-│  Archetype + Mood + Circuit Breaker + 4 Tools + Scoring      │
+│  Context → Pool Fetch → Ranking → Reasoning → Validation     │
+│  Archetype + Mood + Circuit Breaker + Vector DB + Scoring     │
 └────────┬────────────────────────────────────────────┬────────┘
          │                                   │
-         ▼ <─── (3) MEMORY ───>              ▼ <─── (4) TOOLS ───>
-   [ PERSONA DATA ]                    [ REAL-TIME WORLD ]
-   - Archetype: The Grind             - YouTube: Last 24h videos
-   - Chess ELO: 420                   - Twitch: LIVE streams ← 🔴
-   - Mood: Tired → Chill              - TikTok: Deep links
-   - Negative signals                 - Chess.com: ELO + Puzzle
+         ▼ <─── (3) MEMORY ───>              ▼ <─── (4) SUGGESTION POOL ───>
+   [ PERSONA DATA ]                    [ VECTOR DATABASE ]
+   - Archetype: The Grind             - 150+ suggestions with URLs
+   - persona_embedding vector         - Influencers (Twitch/YT/TikTok)
+   - Mood: Tired → Chill              - Activities (physical/creative)
+   - Negative signals                 - Engagement counters per item
          │                                   │
          └──────────────┬────────────────────┘
                         ▼
                (5) RANKING NODE
-         Score each item by archetype:
-         Grind → Chess +30, YouTube +15
-         Chill → Twitch +20, TikTok +15
-         Spark → Least-used platform +25
-         LIVE streams → +50 for Chill/Spark
-         + Circuit Breaker weights
-         + Strict Rotation penalty
-         + Blacklist enforcement
+         Score each item by:
+         - Vector similarity to persona
+         - Engagement ratio (accepts/shows)
+         - Archetype bonuses
+         - Circuit Breaker weights
+         - Graduated Rotation penalty
+         - Item + Platform Blacklists
                         │
                         ▼
             (5b) VALIDATION NODE
@@ -65,12 +64,14 @@ BAF is an AI-powered anti-boredom app. The user presses the **BAF** button when 
                ▼                 ▼
           [ LFG 🔥 ]        [ Nah 👎 ]
        (Opens link +       (Why? → logs
-        logs accept +      negative signal
-        archetype used)    + new suggestion)
+        logs accept +      negative signal +
+        engagement++)      engagement++ +
+                           new suggestion)
                └────────┬────────┘
                         ▼
-               (7) PERSONA UPDATED
-         baf_history tracks archetype used
+               (7) PERSONA + POOL UPDATED
+         persona_embedding nudged
+         pool entry engagement counters updated
 ```
 
 ## Mood Sensor
@@ -85,16 +86,33 @@ The Brain doesn't just use the stored archetype — it uses a **real-time mood o
 - **60-min Item Blacklist**: Rejected specific items (by URL) stored in `persona_stats` JSONB, enforced as score = -999 for 60 minutes — prevents the same TikTok creator or Twitch streamer from returning after rejection
 - **Graduated Rotation**: Last platform = -60, 2nd-last = -30, 3rd-last = -15 — creates a spreading effect that naturally mixes platforms
 
-## Tool Registry (4 Parallel Tools)
+## Content Source: suggestion_pool (Vector DB)
 
-| Tool | API | Data Retrieved |
-|------|-----|---------------|
-| **YouTube** | YouTube Data API v3 | Last 24h videos from favorite channels (with clickable URLs) |
-| **Twitch** | Twitch Helix API | Live stream status, viewer count, game name, stream title |
-| **TikTok** | Deep Link Generator | Direct profile URLs for favorite TikTok creators |
-| **Chess** | Chess.com PubAPI | Current ELO, daily puzzle URL + title |
+The `suggestion_pool` is the **sole content source**. No hardcoded defaults exist anywhere.
 
-All tools run **in parallel** via `Promise.all`. Every tool output is Zod-validated.
+| Column | Type | Purpose |
+|--------|------|--------|
+| `content_text` | TEXT | The suggestion text shown to users |
+| `category` | TEXT | Category (influencer, physical, creative, gaming, etc.) |
+| `platform` | TEXT | Platform tag (youtube, twitch, tiktok, chess, general) |
+| `url` | TEXT | Real clickable URL |
+| `embedding` | vector(1536) | Semantic vector for similarity search |
+| `times_shown` | INT | How many times this was surfaced |
+| `times_accepted` | INT | How many times users clicked LFG |
+| `times_rejected` | INT | How many times users clicked Nah |
+| `is_active` | BOOLEAN | Can be deactivated without deletion |
+
+### Fetch Strategy
+1. **With persona_embedding**: Cosine similarity search → top 20 matches
+2. **Without persona_embedding**: Popularity-weighted random (engagement ratio)
+3. **Optional enrichment**: External APIs (Twitch live check, Chess puzzle) enhance pool entries if API keys are configured
+
+### External API Tools (Optional Enrichment)
+
+| Tool | API | Purpose |
+|------|-----|--------|
+| **Twitch** | Twitch Helix API | Check if pool's Twitch streamers are LIVE → boost score |
+| **Chess** | Chess.com PubAPI | Fetch daily puzzle URL for chess-category pool entries |
 
 ## Ranking Engine
 
@@ -148,14 +166,15 @@ AI parses answers → maps to archetype + extracts interest tags + populates DB.
 - **Negative Signals**: Rejection reasons logged per category, adjusting future suggestions
 - **No-Repeat Engine**: Full history check + server-side duplicate detection + unique request IDs
 - **Ranking Engine**: Priority scoring per archetype, LIVE +50 bonus, cooldown/blacklist/weight penalties
-- **4-Tool Parallel Fetch**: YouTube, Twitch, TikTok, Chess all fetched simultaneously (gated by interests)
+- **Vector-First Fetch**: All suggestions come from the `suggestion_pool` vector DB — no hardcoded defaults
 - **LIVE Detection**: Twitch streams get glowing "LIVE NOW" badge + priority boost
 - **Rich Twitch Cards**: Stream title, game, viewer count displayed in purple UI strip
 - **Forced Links**: Every suggestion includes a clickable URL from real content
 - **Platform Icons**: Color-coded per platform (YouTube red, Twitch purple, TikTok, Chess green)
 - **Archetype Tracking**: Every baf_history entry records which archetype was used
 - **Family-Friendly**: All suggestions appropriate for all ages
-- **Fallback Rescues**: 10 default suggestions if APIs fail
+- **Fallback Rescues**: 10 default activity suggestions if pool is empty AND APIs fail
+- **Dynamic Pool Engagement**: Every accept/reject updates `times_shown`/`times_accepted`/`times_rejected` counters on the pool entry
 
 ## Semantic Persona Matching (pgvector)
 
@@ -192,7 +211,7 @@ The Brain uses **pgvector** to turn user personality into a mathematical vector 
 - **profiles**: Added `persona_embedding vector(1536)` column
 - **interests**: Added `embedding vector(1536)` column
 - **baf_history**: Added `embedding vector(1536)` column
-- **suggestion_pool** (new table): `id`, `content_text`, `category`, `embedding vector(1536)`
+- **suggestion_pool** (new table): `id`, `content_text`, `category`, `platform`, `url`, `embedding vector(1536)`, `times_shown`, `times_accepted`, `times_rejected`, `is_active`
 
 ### Postgres RPC Function
 
@@ -208,11 +227,11 @@ Every interaction shifts the persona vector:
 
 ### Integration with LangGraph
 
-Semantic search is a **5th parallel tool** alongside YouTube/Twitch/TikTok/Chess:
+The suggestion pool is the **primary content source** in the Brain pipeline:
 ```
-Context → Parallel Fetch [YouTube, Twitch, TikTok, Chess, SemanticSearch] → Ranking → Reasoning → Validation
+Context → Pool Fetch [SemanticSearch OR PopularFetch] → Optional Live Enrichment → Ranking → Reasoning → Validation
 ```
-Semantic matches get a base score of 35 and are ranked alongside live content.
+Pool entries are scored: base 35 × similarity + engagement bonus + archetype bonuses + rotation/blacklist penalties.
 
 ## Tech Stack
 

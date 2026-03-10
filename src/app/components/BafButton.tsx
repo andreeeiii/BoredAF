@@ -16,6 +16,7 @@ interface Rescue {
   twitchUsername?: string;
   viewerCount?: number | null;
   gameName?: string | null;
+  poolId?: string | null;
 }
 
 const WHY_REASONS = [
@@ -102,6 +103,7 @@ export default function BafButton() {
         source: rescue.source,
         archetype: rescue.archetype,
         link: rescue.link,
+        poolId: rescue.poolId,
       }),
     });
 

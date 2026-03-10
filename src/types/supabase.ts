@@ -143,21 +143,39 @@ export interface Database {
           id: string;
           content_text: string;
           category: string;
+          platform: string;
+          url: string;
           embedding: string | null;
+          times_shown: number;
+          times_accepted: number;
+          times_rejected: number;
+          is_active: boolean;
           created_at: string;
         };
         Insert: {
           id?: string;
           content_text: string;
           category: string;
+          platform?: string;
+          url?: string;
           embedding?: string | null;
+          times_shown?: number;
+          times_accepted?: number;
+          times_rejected?: number;
+          is_active?: boolean;
           created_at?: string;
         };
         Update: {
           id?: string;
           content_text?: string;
           category?: string;
+          platform?: string;
+          url?: string;
           embedding?: string | null;
+          times_shown?: number;
+          times_accepted?: number;
+          times_rejected?: number;
+          is_active?: boolean;
           created_at?: string;
         };
         Relationships: [];
@@ -177,8 +195,35 @@ export interface Database {
           id: string;
           content_text: string;
           category: string;
+          platform: string;
+          url: string;
+          times_shown: number;
+          times_accepted: number;
+          times_rejected: number;
           similarity: number;
         }>;
+      };
+      fetch_popular_suggestions: {
+        Args: {
+          fetch_count?: number;
+        };
+        Returns: Array<{
+          id: string;
+          content_text: string;
+          category: string;
+          platform: string;
+          url: string;
+          times_shown: number;
+          times_accepted: number;
+          times_rejected: number;
+        }>;
+      };
+      update_pool_engagement: {
+        Args: {
+          p_pool_id: string;
+          p_outcome: string;
+        };
+        Returns: undefined;
       };
       nudge_persona_embedding: {
         Args: {

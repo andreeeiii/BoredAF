@@ -2,39 +2,32 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import { StateGraph, Annotation, END } from "@langchain/langgraph";
 import { z } from "zod";
 import { getPersona, type Persona } from "../persona";
-import {
-  fetchYouTubeVideos,
-  fetchChessData,
-  getDefaultRescue,
-  type YouTubeResult,
-  type ChessResult,
-} from "../tools/registry";
-import {
-  fetchTwitchStreams,
-  fetchTikTokLinks,
-  type TwitchResult,
-  type TikTokResult,
-} from "../tools/socialTools";
+import { getDefaultRescue } from "../tools/registry";
 import {
   getCurrentMood,
   getArchetypeStrategy,
   type MoodState,
 } from "../mood";
-import { rankContent, type RankedItem, type RankingInput } from "./ranking";
+import { rankContent, type RankedItem } from "./ranking";
 import { computeCategoryWeights, type CategoryWeights } from "./circuitBreaker";
-import { searchSemanticSuggestions, type SemanticMatch } from "../embeddings";
+import { searchSemanticSuggestions, fetchPopularSuggestions, type SemanticMatch } from "../embeddings";
+import {
+  fetchTwitchStreams,
+  type TwitchStream,
+} from "../tools/socialTools";
 
 export const RescueSchema = z.object({
   suggestion: z.string(),
   emoji: z.string(),
   vibe: z.string(),
-  source: z.enum(["youtube", "chess", "twitch", "tiktok", "semantic", "fallback", "custom"]),
+  source: z.enum(["youtube", "chess", "twitch", "tiktok", "general", "semantic", "fallback", "custom"]),
   link: z.string().nullable(),
   isLive: z.boolean().optional(),
   archetype: z.string().optional(),
   twitchUsername: z.string().optional(),
   viewerCount: z.number().nullable().optional(),
   gameName: z.string().nullable().optional(),
+  poolId: z.string().nullable().optional(),
 });
 
 export type Rescue = z.infer<typeof RescueSchema>;
@@ -43,14 +36,14 @@ const BafState = Annotation.Root({
   userId: Annotation<string>,
   userPersona: Annotation<Persona | null>,
   mood: Annotation<MoodState | null>,
-  toolResults: Annotation<RankingInput | null>,
+  poolSuggestions: Annotation<SemanticMatch[]>,
   rankedContent: Annotation<RankedItem[]>,
   previousSuggestions: Annotation<string[]>,
   recentPlatforms: Annotation<string[]>,
   blacklistedPlatforms: Annotation<string[]>,
   blacklistedItems: Annotation<string[]>,
   categoryWeights: Annotation<CategoryWeights>,
-  semanticMatches: Annotation<SemanticMatch[]>,
+  liveStreams: Annotation<TwitchStream[]>,
   finalRescue: Annotation<Rescue | null>,
   error: Annotation<string | null>,
 });
@@ -107,86 +100,61 @@ async function contextNode(
   }
 }
 
-const DEFAULT_YOUTUBE_CHANNELS = [
-  "UCX6OQ3DkcsbYNE6H8uQQuVA", // MrBeast
-  "UCq-Fj5jknLsUf-MWSy4_brA", // Kurzgesagt
-  "UC2C_jShtL725hvbm1arSV9w", // GCN (cycling/fitness)
-];
-const DEFAULT_TWITCH_STREAMERS = ["shroud", "pokimane", "xqc"];
-const DEFAULT_TIKTOK_CREATORS = ["khaby.lame", "charlidamelio", "zachking"];
-
-async function parallelFetchNode(
+async function poolFetchNode(
   state: BafStateType
 ): Promise<Partial<BafStateType>> {
   if (!state.userPersona) {
-    return { toolResults: null };
-  }
-
-  const interests = state.userPersona.interests;
-  const hasAnyInterests = interests.length > 0;
-
-  const youtubeChannels = interests
-    .filter((i) => i.platform === "youtube")
-    .map((i) => i.ref_id);
-
-  const twitchUsernames = interests
-    .filter((i) => i.platform === "twitch")
-    .map((i) => i.ref_id);
-
-  const tiktokUsernames = interests
-    .filter((i) => i.platform === "tiktok")
-    .map((i) => i.ref_id);
-
-  const hasChessInterest = interests.some(
-    (i) => i.platform === "chess" || i.platform === "game"
-  );
-  const chessStats = state.userPersona.stats.chess as
-    | { username?: string }
-    | undefined;
-
-  const finalYoutube = youtubeChannels.length > 0 ? youtubeChannels : (hasAnyInterests ? [] : DEFAULT_YOUTUBE_CHANNELS);
-  const finalTwitch = twitchUsernames.length > 0 ? twitchUsernames : (hasAnyInterests ? [] : DEFAULT_TWITCH_STREAMERS);
-  const finalTiktok = tiktokUsernames.length > 0 ? tiktokUsernames : (hasAnyInterests ? [] : DEFAULT_TIKTOK_CREATORS);
-
-  if (!hasAnyInterests) {
-    console.log(`[BAF][Fetch] No interests found — using default content sources across all platforms`);
+    return { poolSuggestions: [] };
   }
 
   const personaEmbedding = state.userPersona.profile.persona_embedding;
 
-  const [youtube, chess, twitch, tiktok, semantic] = await Promise.all([
-    finalYoutube.length > 0
-      ? fetchYouTubeVideos(finalYoutube)
-      : Promise.resolve({ videos: [], error: null } as YouTubeResult),
-    hasChessInterest
-      ? fetchChessData(chessStats?.username)
-      : Promise.resolve({ currentElo: null, dailyPuzzleUrl: null, dailyPuzzleTitle: null, error: null } as ChessResult),
-    finalTwitch.length > 0
-      ? fetchTwitchStreams(finalTwitch)
-      : Promise.resolve({ streams: [], error: null } as TwitchResult),
-    Promise.resolve(
-      finalTiktok.length > 0
-        ? fetchTikTokLinks(finalTiktok)
-        : ({ links: [], error: null } as TikTokResult)
-    ),
-    personaEmbedding
-      ? searchSemanticSuggestions(personaEmbedding, 10, 0.1)
-      : Promise.resolve([] as SemanticMatch[]),
-  ]);
+  let poolSuggestions: SemanticMatch[];
 
-  if (semantic.length > 0) {
-    console.log(`[BAF][SemanticFetch] Got ${semantic.length} semantic matches (top: "${semantic[0].content_text.slice(0, 40)}..." sim=${semantic[0].similarity.toFixed(3)})`);
-  } else if (personaEmbedding) {
-    console.log(`[BAF][SemanticFetch] No semantic matches found (persona embedding exists but no pool matches)`);
+  if (personaEmbedding) {
+    poolSuggestions = await searchSemanticSuggestions(personaEmbedding, 20, 0.0);
+    console.log(`[BAF][PoolFetch] Semantic search returned ${poolSuggestions.length} matches`);
+  } else {
+    const popular = await fetchPopularSuggestions(20);
+    poolSuggestions = popular.map((p) => ({
+      ...p,
+      similarity: 0.5,
+    }));
+    console.log(`[BAF][PoolFetch] No persona embedding — using ${poolSuggestions.length} popular suggestions`);
   }
 
-  return { toolResults: { youtube, chess, twitch, tiktok }, semanticMatches: semantic };
+  if (poolSuggestions.length > 0) {
+    console.log(`[BAF][PoolFetch] Top: "${poolSuggestions[0].content_text.slice(0, 40)}..." (${poolSuggestions[0].platform}, sim=${poolSuggestions[0].similarity.toFixed(3)})`);
+  }
+
+  const twitchUsernames = poolSuggestions
+    .filter((s) => s.platform === "twitch" && s.url)
+    .map((s) => {
+      const match = s.url.match(/twitch\.tv\/([^/?]+)/);
+      return match ? match[1] : null;
+    })
+    .filter((u): u is string => u !== null);
+
+  let liveStreams: TwitchStream[] = [];
+  if (twitchUsernames.length > 0) {
+    try {
+      const twitchResult = await fetchTwitchStreams(Array.from(new Set(twitchUsernames)));
+      liveStreams = twitchResult.streams.filter((s) => s.isLive);
+      if (liveStreams.length > 0) {
+        console.log(`[BAF][LiveEnrich] ${liveStreams.length} Twitch streamers are LIVE: ${liveStreams.map((s) => s.username).join(", ")}`);
+      }
+    } catch (err) {
+      console.error(`[BAF][LiveEnrich] Twitch check failed:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  return { poolSuggestions, liveStreams };
 }
 
 async function rankingNode(
   state: BafStateType
 ): Promise<Partial<BafStateType>> {
-  if (!state.toolResults || !state.mood) {
+  if (!state.mood) {
     return { rankedContent: [] };
   }
 
@@ -197,15 +165,15 @@ async function rankingNode(
   }));
 
   const ranked = rankContent(
-    state.toolResults,
+    state.poolSuggestions ?? [],
+    state.liveStreams ?? [],
     state.mood.effectiveArchetype,
     state.recentPlatforms ?? [],
     state.previousSuggestions ?? [],
     recentHistory,
     state.blacklistedPlatforms ?? [],
     state.blacklistedItems ?? [],
-    state.categoryWeights ?? {},
-    state.semanticMatches ?? []
+    state.categoryWeights ?? {}
   );
 
   return { rankedContent: ranked };
@@ -259,10 +227,11 @@ async function reasoningNode(
         suggestion: `Check out: ${topItem.title.slice(0, 60)}`,
         emoji: topItem.isLive ? "🔴" : "🎯",
         vibe: topItem.isLive ? "live" : "discover",
-        source: topItem.platform,
+        source: topItem.platform as Rescue["source"],
         link: topItem.url,
         isLive: topItem.isLive,
         archetype: state.mood?.effectiveArchetype ?? "The Spark",
+        poolId: (topItem.metadata?.poolId as string) ?? null,
       };
       return {
         finalRescue: enrichWithTwitchMeta(base, state.rankedContent ?? []),
@@ -314,7 +283,6 @@ async function reasoningNode(
   const hasLive = liveStreams.length > 0;
 
   const chessElo =
-    state.toolResults?.chess?.currentElo ??
     (state.userPersona.stats.chess as { elo?: number })?.elo ??
     null;
 
@@ -367,7 +335,7 @@ ACCEPTS:
 ${accepts ? `- ${accepts}` : "None"}
 
 Respond in EXACTLY this JSON format:
-{"suggestion": "unique witty text max 15 words", "emoji": "one emoji", "vibe": "one word", "source": "youtube|chess|twitch|tiktok|semantic|custom", "link": "real_url_from_list_above_or_null_for_semantic", "isLive": false}`;
+{"suggestion": "unique witty text max 15 words", "emoji": "one emoji", "vibe": "one word", "source": "youtube|chess|twitch|tiktok|general|semantic|custom", "link": "real_url_from_list_above_or_null_for_semantic", "isLive": false}`;
 
   try {
     const response = await llm.invoke(prompt);
@@ -412,10 +380,11 @@ Respond in EXACTLY this JSON format:
           suggestion: `${fallbackItem.isLive ? "🔴 LIVE: " : ""}${fallbackItem.title.slice(0, 60)}`,
           emoji: fallbackItem.isLive ? "🔴" : "🎯",
           vibe: fallbackItem.isLive ? "live" : "discover",
-          source: fallbackItem.platform,
+          source: fallbackItem.platform as Rescue["source"],
           link: fallbackItem.url,
           isLive: fallbackItem.isLive,
           archetype,
+          poolId: (fallbackItem.metadata?.poolId as string) ?? null,
         };
         return {
           finalRescue: enrichWithTwitchMeta(base, ranked),
@@ -443,10 +412,11 @@ Respond in EXACTLY this JSON format:
         suggestion: `${topItem.isLive ? "🔴 LIVE: " : ""}${topItem.title.slice(0, 60)}`,
         emoji: topItem.isLive ? "🔴" : "🎯",
         vibe: topItem.isLive ? "live" : "discover",
-        source: topItem.platform,
+        source: topItem.platform as Rescue["source"],
         link: topItem.url,
         isLive: topItem.isLive,
         archetype,
+        poolId: (topItem.metadata?.poolId as string) ?? null,
       };
       return {
         finalRescue: enrichWithTwitchMeta(base, state.rankedContent ?? []),
@@ -528,10 +498,11 @@ async function validationNode(
       suggestion: `${matchingItem.isLive ? "\u{1F534} LIVE: " : ""}${matchingItem.title.slice(0, 60)}`,
       emoji: matchingItem.isLive ? "\u{1F534}" : "\u{1F3AF}",
       vibe: matchingItem.isLive ? "live" : "discover",
-      source: matchingItem.platform,
+      source: matchingItem.platform as Rescue["source"],
       link: matchingItem.url,
       isLive: matchingItem.isLive,
       archetype: state.mood?.effectiveArchetype ?? "The Spark",
+      poolId: (matchingItem.metadata?.poolId as string) ?? null,
     };
     console.log(`[BAF][Validation] Re-rolled to "${matchingItem.platform}" — "${matchingItem.title}"`);
     return { finalRescue: enrichWithTwitchMeta(base, ranked) };
@@ -543,13 +514,13 @@ async function validationNode(
 function buildGraph() {
   const graph = new StateGraph(BafState)
     .addNode("context", contextNode)
-    .addNode("parallelFetch", parallelFetchNode)
+    .addNode("poolFetch", poolFetchNode)
     .addNode("ranking", rankingNode)
     .addNode("reasoning", reasoningNode)
     .addNode("validation", validationNode)
     .addEdge("__start__", "context")
-    .addEdge("context", "parallelFetch")
-    .addEdge("parallelFetch", "ranking")
+    .addEdge("context", "poolFetch")
+    .addEdge("poolFetch", "ranking")
     .addEdge("ranking", "reasoning")
     .addEdge("reasoning", "validation")
     .addEdge("validation", END);
@@ -573,14 +544,14 @@ export async function runBafBrain(userId: string): Promise<Rescue> {
     userId,
     userPersona: null,
     mood: null,
-    toolResults: null,
+    poolSuggestions: [],
     rankedContent: [],
     previousSuggestions: [],
     recentPlatforms: [],
     blacklistedPlatforms: [],
     blacklistedItems: [],
     categoryWeights: {},
-    semanticMatches: [],
+    liveStreams: [],
     finalRescue: null,
     error: null,
   });

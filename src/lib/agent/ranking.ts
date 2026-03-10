@@ -1,23 +1,14 @@
 import type { Archetype } from "../mood";
-import type { YouTubeResult } from "../tools/registry";
-import type { ChessResult } from "../tools/registry";
-import type { TwitchResult, TikTokResult } from "../tools/socialTools";
 import type { SemanticMatch } from "../embeddings";
+import type { TwitchStream } from "../tools/socialTools";
 
 export interface RankedItem {
-  platform: "youtube" | "twitch" | "tiktok" | "chess" | "semantic";
+  platform: string;
   title: string;
   url: string;
   score: number;
   isLive: boolean;
   metadata: Record<string, unknown>;
-}
-
-export interface RankingInput {
-  youtube: YouTubeResult | null;
-  chess: ChessResult | null;
-  twitch: TwitchResult | null;
-  tiktok: TikTokResult | null;
 }
 
 export interface HistoryEntry {
@@ -27,75 +18,60 @@ export interface HistoryEntry {
 }
 
 export function rankContent(
-  tools: RankingInput,
+  poolSuggestions: SemanticMatch[],
+  liveStreams: TwitchStream[],
   archetype: Archetype,
   recentPlatforms: string[],
   previousSuggestions: string[],
   recentHistory: HistoryEntry[] = [],
   blacklistedPlatforms: string[] = [],
   blacklistedItems: string[] = [],
-  categoryWeights: Record<string, number> = {},
-  semanticMatches: SemanticMatch[] = []
+  categoryWeights: Record<string, number> = {}
 ): RankedItem[] {
   const items: RankedItem[] = [];
 
-  for (const video of tools.youtube?.videos ?? []) {
-    items.push({
-      platform: "youtube",
-      title: video.title,
-      url: video.url,
-      score: 30,
-      isLive: false,
-      metadata: { channelTitle: video.channelTitle, thumbnail: video.thumbnail },
-    });
+  const liveByUsername = new Map<string, TwitchStream>();
+  for (const stream of liveStreams) {
+    if (stream.isLive) {
+      liveByUsername.set(stream.username.toLowerCase(), stream);
+    }
   }
 
-  for (const stream of tools.twitch?.streams ?? []) {
+  for (const entry of poolSuggestions) {
+    const baseScore = Math.round(35 * entry.similarity);
+
+    const engagementBonus = entry.times_shown > 0
+      ? Math.round(10 * (entry.times_accepted / Math.max(entry.times_shown, 1)))
+      : 0;
+
+    let isLive = false;
+    const twitchMatch = entry.platform === "twitch" && entry.url
+      ? entry.url.match(/twitch\.tv\/([^/?]+)/)
+      : null;
+    const twitchUsername = twitchMatch ? twitchMatch[1].toLowerCase() : null;
+    const liveData = twitchUsername ? liveByUsername.get(twitchUsername) : null;
+
+    if (liveData) {
+      isLive = true;
+    }
+
     items.push({
-      platform: "twitch",
-      title: stream.title,
-      url: stream.url,
-      score: stream.isLive ? 60 : 10,
-      isLive: stream.isLive,
+      platform: entry.platform || "general",
+      title: entry.content_text,
+      url: entry.url || "",
+      score: baseScore + engagementBonus + (isLive ? 50 : 0),
+      isLive,
       metadata: {
-        username: stream.username,
-        viewerCount: stream.viewerCount,
-        gameName: stream.gameName,
+        category: entry.category,
+        similarity: entry.similarity,
+        poolId: entry.id,
+        ...(liveData ? {
+          username: liveData.username,
+          viewerCount: liveData.viewerCount,
+          gameName: liveData.gameName,
+          streamTitle: liveData.title,
+        } : {}),
       },
-    });
-  }
-
-  for (const link of tools.tiktok?.links ?? []) {
-    items.push({
-      platform: "tiktok",
-      title: `Check out ${link.displayName} on TikTok`,
-      url: link.url,
-      score: 20,
-      isLive: false,
-      metadata: { username: link.username },
-    });
-  }
-
-  if (tools.chess?.dailyPuzzleUrl) {
-    items.push({
-      platform: "chess",
-      title: tools.chess.dailyPuzzleTitle ?? "Daily Chess Puzzle",
-      url: tools.chess.dailyPuzzleUrl,
-      score: 25,
-      isLive: false,
-      metadata: { currentElo: tools.chess.currentElo },
-    });
-  }
-
-  for (const match of semanticMatches) {
-    const semanticScore = Math.round(35 * match.similarity);
-    items.push({
-      platform: "semantic",
-      title: match.content_text,
-      url: "",
-      score: semanticScore,
-      isLive: false,
-      metadata: { category: match.category, similarity: match.similarity, poolId: match.id },
     });
   }
 
