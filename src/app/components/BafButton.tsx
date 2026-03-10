@@ -101,6 +101,7 @@ export default function BafButton() {
         reason,
         source: rescue.source,
         archetype: rescue.archetype,
+        link: rescue.link,
       }),
     });
 

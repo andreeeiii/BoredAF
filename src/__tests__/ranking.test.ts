@@ -164,7 +164,8 @@ describe("rankContent", () => {
       [],
       [],
       [],
-      ["chess"]
+      ["chess"],
+      []
     );
     const chess = items.find((i) => i.platform === "chess");
     expect(chess).toBeDefined();
@@ -183,6 +184,7 @@ describe("rankContent", () => {
       [],
       [],
       history,
+      [],
       []
     );
     const chess = items.find((i) => i.platform === "chess");
@@ -199,6 +201,7 @@ describe("rankContent", () => {
       [],
       [],
       [],
+      [],
       { chess: 0, youtube: 0.3, twitch: 1.0, tiktok: 1.0 }
     );
     const chess = items.find((i) => i.platform === "chess");
@@ -209,11 +212,12 @@ describe("rankContent", () => {
     expect(twitch!.score).toBeGreaterThan(50);
   });
 
-  it("applies strict rotation penalty (-60) when platform matches last suggested", () => {
+  it("applies graduated rotation penalty (-60 last, -30 2nd-last, -15 3rd-last)", () => {
     const items = rankContent(
       baseTools,
       "The Spark",
       ["chess"],
+      [],
       [],
       [],
       []
@@ -231,12 +235,127 @@ describe("rankContent", () => {
       ["chess"],
       [],
       [],
+      [],
       []
     );
     const twitch = items.find((i) => i.platform === "twitch" && i.isLive);
     expect(twitch).toBeDefined();
     // Live twitch for Chill = 60 + 50 + 20 = 130, no rotation penalty
     expect(twitch!.score).toBeGreaterThanOrEqual(100);
+  });
+});
+
+describe("Item Blacklist & Graduated Rotation", () => {
+  it("sets blacklisted item score to -999 by URL", () => {
+    const items = rankContent(
+      baseTools,
+      "The Chill",
+      [],
+      [],
+      [],
+      [],
+      ["https://twitch.tv/gothamchess"]
+    );
+    const gotham = items.find((i) => i.url === "https://twitch.tv/gothamchess");
+    expect(gotham).toBeDefined();
+    expect(gotham!.score).toBe(-999);
+  });
+
+  it("does not blacklist items whose URLs are not in the blacklist", () => {
+    const items = rankContent(
+      baseTools,
+      "The Chill",
+      [],
+      [],
+      [],
+      [],
+      ["https://twitch.tv/some_other_streamer"]
+    );
+    const gotham = items.find((i) => i.url === "https://twitch.tv/gothamchess");
+    expect(gotham).toBeDefined();
+    expect(gotham!.score).toBeGreaterThan(0);
+  });
+
+  it("blacklists multiple items simultaneously", () => {
+    const items = rankContent(
+      baseTools,
+      "The Chill",
+      [],
+      [],
+      [],
+      [],
+      ["https://twitch.tv/gothamchess", "https://www.tiktok.com/@chessguy"]
+    );
+    const gotham = items.find((i) => i.url === "https://twitch.tv/gothamchess");
+    const tiktok = items.find((i) => i.url === "https://www.tiktok.com/@chessguy");
+    expect(gotham!.score).toBe(-999);
+    expect(tiktok!.score).toBe(-999);
+  });
+
+  it("applies graduated rotation: -60 for last, -30 for 2nd-last", () => {
+    const items = rankContent(
+      baseTools,
+      "The Chill",
+      ["twitch", "youtube"],
+      [],
+      [],
+      [],
+      []
+    );
+    const liveStream = items.find((i) => i.platform === "twitch" && i.isLive);
+    const youtube = items.find((i) => i.platform === "youtube");
+    // twitch was last: -60, youtube was 2nd-last: -30
+    // Live twitch Chill: base 60 + 50 + 20 - 60 = 70
+    expect(liveStream!.score).toBeLessThanOrEqual(75);
+    expect(liveStream!.score).toBeGreaterThan(0);
+    // YouTube Chill: base 30 + 10 - 30 = 10
+    expect(youtube!.score).toBeLessThanOrEqual(15);
+  });
+
+  it("applies all three levels of graduated rotation", () => {
+    const items = rankContent(
+      baseTools,
+      "The Chill",
+      ["twitch", "youtube", "chess"],
+      [],
+      [],
+      [],
+      []
+    );
+    const chess = items.find((i) => i.platform === "chess");
+    // Chess Chill: base 25 - 15 (chill penalty) - 15 (3rd-last) = -5
+    expect(chess!.score).toBeLessThan(15);
+  });
+
+  it("detects duplicates by bidirectional title matching", () => {
+    const items = rankContent(
+      baseTools,
+      "The Chill",
+      [],
+      ["Check out @chessguy on TikTok"]
+    );
+    const tiktok = items.find((i) => i.platform === "tiktok");
+    expect(tiktok).toBeDefined();
+    // "Check out @chessguy on TikTok" matches bidirectionally
+    expect(tiktok!.score).toBeLessThan(0);
+  });
+
+  it("item blacklist and platform blacklist work independently", () => {
+    const items = rankContent(
+      baseTools,
+      "The Chill",
+      [],
+      [],
+      [],
+      ["tiktok"],
+      ["https://twitch.tv/hikaru"]
+    );
+    const tiktok = items.find((i) => i.platform === "tiktok");
+    const hikaru = items.find((i) => i.url === "https://twitch.tv/hikaru");
+    const gotham = items.find((i) => i.url === "https://twitch.tv/gothamchess");
+    expect(tiktok!.score).toBe(-999);
+    expect(hikaru!.score).toBe(-999);
+    expect(gotham!.score).toBeGreaterThan(0);
   });
 });
 
@@ -251,6 +370,7 @@ describe("Semantic Ranking", () => {
     const items = rankContent(
       baseTools,
       "The Spark",
+      [],
       [],
       [],
       [],
@@ -275,6 +395,7 @@ describe("Semantic Ranking", () => {
       [],
       [],
       [],
+      [],
       {},
       semanticMatches
     );
@@ -290,6 +411,7 @@ describe("Semantic Ranking", () => {
     const items = rankContent(
       baseTools,
       "The Spark",
+      [],
       [],
       [],
       [],
@@ -314,6 +436,7 @@ describe("Semantic Ranking", () => {
       [],
       [],
       [],
+      [],
       { youtube: 0.3, chess: 0, semantic: 1.0 },
       semanticMatches
     );
@@ -327,6 +450,7 @@ describe("Semantic Ranking", () => {
     const items = rankContent(
       baseTools,
       "The Spark",
+      [],
       [],
       [],
       [],

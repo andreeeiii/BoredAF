@@ -33,6 +33,7 @@ export function rankContent(
   previousSuggestions: string[],
   recentHistory: HistoryEntry[] = [],
   blacklistedPlatforms: string[] = [],
+  blacklistedItems: string[] = [],
   categoryWeights: Record<string, number> = {},
   semanticMatches: SemanticMatch[] = []
 ): RankedItem[] {
@@ -142,11 +143,17 @@ export function rankContent(
       item.score -= 40;
     }
 
-    const isDuplicate = previousSuggestions.some(
-      (prev) =>
-        prev.toLowerCase().includes(item.title.toLowerCase().slice(0, 20))
+    const isDuplicateUrl = previousSuggestions.some(
+      (prev) => item.url && prev.toLowerCase().includes(item.url.toLowerCase())
     );
-    if (isDuplicate) {
+    const isDuplicateTitle = previousSuggestions.some(
+      (prev) =>
+        item.title.length > 5 &&
+        (prev.toLowerCase().includes(item.title.toLowerCase().slice(0, 20)) ||
+         item.title.toLowerCase().includes(prev.toLowerCase().slice(0, 20)))
+    );
+    if (isDuplicateUrl || isDuplicateTitle) {
+      console.log(`[BAF][Duplicate] "${item.title.slice(0, 30)}" matches previous suggestion — score ${item.score} → ${item.score - 100}`);
       item.score -= 100;
     }
 
@@ -159,7 +166,12 @@ export function rankContent(
     }
 
     if (blacklistedPlatforms.includes(item.platform)) {
-      console.log(`[BAF][Blacklist] "${item.platform}" is blacklisted — score ${item.score} → -999`);
+      console.log(`[BAF][Blacklist] platform "${item.platform}" is blacklisted — score ${item.score} → -999`);
+      item.score = -999;
+    }
+
+    if (item.url && blacklistedItems.includes(item.url)) {
+      console.log(`[BAF][ItemBlacklist] "${item.url}" is blacklisted — score ${item.score} → -999`);
       item.score = -999;
     }
 
@@ -170,10 +182,12 @@ export function rankContent(
       console.log(`[BAF][CircuitBreaker] "${item.platform}" weight=${Math.round(weight * 100)}% — score ${before} → ${item.score}`);
     }
 
-    const lastPlatform = recentPlatforms[0];
-    if (lastPlatform && lastPlatform === item.platform) {
-      console.log(`[BAF][StrictRotation] "${item.platform}" was last suggested — penalty -60`);
-      item.score -= 60;
+    const rotationPenalties = [60, 30, 15];
+    for (let ri = 0; ri < Math.min(recentPlatforms.length, rotationPenalties.length); ri++) {
+      if (recentPlatforms[ri] === item.platform) {
+        console.log(`[BAF][GraduatedRotation] "${item.platform}" was ${ri === 0 ? "last" : ri === 1 ? "2nd-last" : "3rd-last"} suggested — penalty -${rotationPenalties[ri]}`);
+        item.score -= rotationPenalties[ri];
+      }
     }
   }
 

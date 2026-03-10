@@ -81,8 +81,9 @@ The Brain doesn't just use the stored archetype — it uses a **real-time mood o
 - **Tired signals**: "Too tired" rejection reason → temporarily The Chill for 1 hour
 - **Platform rotation**: Never suggest the same platform 3 times in a row
 - **Circuit Breaker**: 1 Nah → -70% weight for that category; 2 consecutive Nahs → 0% (total lock for session)
-- **30-min Blacklist**: Rejected platform stored in `persona_stats` JSONB, enforced as score = -999 for 30 minutes
-- **Strict Rotation**: Last-suggested platform gets -60 penalty to force platform diversity
+- **30-min Platform Blacklist**: Rejected platform stored in `persona_stats` JSONB, enforced as score = -999 for 30 minutes
+- **60-min Item Blacklist**: Rejected specific items (by URL) stored in `persona_stats` JSONB, enforced as score = -999 for 60 minutes — prevents the same TikTok creator or Twitch streamer from returning after rejection
+- **Graduated Rotation**: Last platform = -60, 2nd-last = -30, 3rd-last = -15 — creates a spreading effect that naturally mixes platforms
 
 ## Tool Registry (4 Parallel Tools)
 
@@ -102,11 +103,12 @@ After fetching, a **ranking node** scores each piece of content:
 - **LIVE bonus**: +50 for Chill and Spark archetypes
 - **Archetype bonuses**: Grind → Chess +30; Chill → Twitch +20; Spark → least-used +25
 - **Platform rotation penalty**: -40 if same platform 3x in a row
-- **Duplicate penalty**: -100 if content matches previous suggestion
+- **Duplicate penalty**: -100 if content URL matches any previous suggestion's URL (URL-based, not text-based)
 - **Category Cooldown**: -80% if platform appeared 3+ times in last 5 history entries
 - **Circuit Breaker Weights**: Score × category weight (0.0–1.0 based on rejection history)
-- **Blacklist**: Score = -999 for platforms rejected in last 30 minutes
-- **Strict Rotation**: -60 if platform matches the most recently suggested platform
+- **Platform Blacklist**: Score = -999 for platforms rejected in last 30 minutes
+- **Item Blacklist**: Score = -999 for specific URLs rejected in last 60 minutes
+- **Graduated Rotation**: -60 for last platform, -30 for 2nd-last, -15 for 3rd-last
 - **Weighted Randomization**: Top-3 items shuffled by weighted random (higher score = higher probability, not guaranteed)
 
 ## Persona-First Validation
@@ -220,4 +222,4 @@ Semantic matches get a base score of 35 and are ranked alongside live content.
 - **Embeddings**: OpenAI text-embedding-3-small (1536 dimensions)
 - **Real-Time Tools**: YouTube Data API v3 + Twitch Helix API + TikTok Deep Links + Chess.com PubAPI
 - **Validation**: Zod schemas on all tool outputs
-- **Testing**: Jest + React Testing Library (100 tests across 11 suites)
+- **Testing**: Jest + React Testing Library (107 tests across 11 suites)

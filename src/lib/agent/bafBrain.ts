@@ -48,6 +48,7 @@ const BafState = Annotation.Root({
   previousSuggestions: Annotation<string[]>,
   recentPlatforms: Annotation<string[]>,
   blacklistedPlatforms: Annotation<string[]>,
+  blacklistedItems: Annotation<string[]>,
   categoryWeights: Annotation<CategoryWeights>,
   semanticMatches: Annotation<SemanticMatch[]>,
   finalRescue: Annotation<Rescue | null>,
@@ -90,6 +91,7 @@ async function contextNode(
       previousSuggestions,
       recentPlatforms,
       blacklistedPlatforms: persona.blacklistedPlatforms,
+      blacklistedItems: persona.blacklistedItems,
       categoryWeights,
       mood,
       error: null,
@@ -201,6 +203,7 @@ async function rankingNode(
     state.previousSuggestions ?? [],
     recentHistory,
     state.blacklistedPlatforms ?? [],
+    state.blacklistedItems ?? [],
     state.categoryWeights ?? {},
     state.semanticMatches ?? []
   );
@@ -575,6 +578,7 @@ export async function runBafBrain(userId: string): Promise<Rescue> {
     previousSuggestions: [],
     recentPlatforms: [],
     blacklistedPlatforms: [],
+    blacklistedItems: [],
     categoryWeights: {},
     semanticMatches: [],
     finalRescue: null,

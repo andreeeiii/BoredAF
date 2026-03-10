@@ -23,6 +23,7 @@ export interface Persona {
     created_at: string;
   }>;
   blacklistedPlatforms: string[];
+  blacklistedItems: string[];
 }
 
 export interface Feedback {
@@ -31,10 +32,11 @@ export interface Feedback {
   reason?: string;
   archetype?: string;
   source?: string;
+  link?: string | null;
 }
 
 export async function getPersona(userId: string): Promise<Persona> {
-  const [profileRes, statsRes, interestsRes, historyRes, blacklistRes] = await Promise.all([
+  const [profileRes, statsRes, interestsRes, historyRes, blacklistRes, itemBlacklistRes] = await Promise.all([
     supabase.from("profiles").select("*").eq("id", userId).single(),
     supabase.from("persona_stats").select("*").eq("user_id", userId),
     supabase
@@ -54,6 +56,12 @@ export async function getPersona(userId: string): Promise<Persona> {
       .eq("user_id", userId)
       .eq("category", "platform_blacklist")
       .single(),
+    supabase
+      .from("persona_stats")
+      .select("value")
+      .eq("user_id", userId)
+      .eq("category", "item_blacklist")
+      .single(),
   ]);
 
   if (profileRes.error) throw new Error(profileRes.error.message);
@@ -70,8 +78,16 @@ export async function getPersona(userId: string): Promise<Persona> {
     .filter((e) => new Date(e.until).getTime() > now)
     .map((e) => e.platform);
 
+  const rawItemBlacklist = (itemBlacklistRes.data?.value as { entries?: Array<{ url: string; until: string }> })?.entries ?? [];
+  const blacklistedItems = rawItemBlacklist
+    .filter((e) => new Date(e.until).getTime() > now)
+    .map((e) => e.url);
+
   if (blacklistedPlatforms.length > 0) {
     console.log(`[BAF] Active platform blacklist: [${blacklistedPlatforms.join(", ")}]`);
+  }
+  if (blacklistedItems.length > 0) {
+    console.log(`[BAF] Active item blacklist (${blacklistedItems.length} items): [${blacklistedItems.slice(0, 3).join(", ")}${blacklistedItems.length > 3 ? "..." : ""}]`);
   }
 
   const rawEmbedding = profileRes.data.persona_embedding as string | null;
@@ -96,6 +112,7 @@ export async function getPersona(userId: string): Promise<Persona> {
       created_at: h.created_at,
     })),
     blacklistedPlatforms,
+    blacklistedItems,
   };
 }
 
@@ -150,7 +167,38 @@ export async function updatePersona(
         { onConflict: "user_id,category" }
       );
 
-      console.log(`[BAF] Blacklisted "${rejectedPlatform}" for 30 minutes (until ${until})`);
+      console.log(`[BAF] Blacklisted platform "${rejectedPlatform}" for 30 minutes (until ${until})`);
+    }
+
+    const rejectedUrl = feedback.link ?? null;
+    if (rejectedUrl) {
+      const ITEM_BLACKLIST_DURATION_MS = 60 * 60 * 1000;
+      const itemUntil = new Date(Date.now() + ITEM_BLACKLIST_DURATION_MS).toISOString();
+
+      const { data: existingItems } = await supabase
+        .from("persona_stats")
+        .select("value")
+        .eq("user_id", userId)
+        .eq("category", "item_blacklist")
+        .single();
+
+      const currentItemEntries = (existingItems?.value as { entries?: Array<{ url: string; until: string }> })?.entries ?? [];
+      const filteredItems = currentItemEntries.filter((e) => new Date(e.until).getTime() > Date.now());
+      if (!filteredItems.some((e) => e.url === rejectedUrl)) {
+        filteredItems.push({ url: rejectedUrl, until: itemUntil });
+      }
+
+      await supabase.from("persona_stats").upsert(
+        {
+          user_id: userId,
+          category: "item_blacklist",
+          value: { entries: filteredItems },
+          last_updated: new Date().toISOString(),
+        },
+        { onConflict: "user_id,category" }
+      );
+
+      console.log(`[BAF] Blacklisted item "${rejectedUrl}" for 60 minutes (until ${itemUntil})`);
     }
 
     if (feedback.reason) {
