@@ -283,35 +283,27 @@ export async function seedPoolFromOnboarding(
         },
         {
           role: "user",
-          content: `A new user just completed onboarding. Based on their answers, generate 15 personalized suggestions they would love.
+          content: `A new user just completed onboarding for an anti-boredom app. Generate 15 personalized suggestions with REAL creator names and URLs.
 
 User profile:
-- Archetype: ${mapping.archetype} (${mapping.archetype === "The Grind" ? "competitive, mastery-focused" : mapping.archetype === "The Chill" ? "relaxation, passive consumer" : "novelty seeker, curious"})
+- Archetype: ${mapping.archetype}
 - Energy: ${mapping.personaData.energy}, Focus: ${mapping.personaData.focus}
 - Tags: ${mapping.tags.join(", ")}
 - ${interestsText}
 
-Their onboarding answers:
+Their EXACT onboarding answers (READ CAREFULLY):
 ${answersText}
 
-Generate exactly 15 suggestions across multiple platforms. Each must have a REAL, working URL to actual content/creators.
+CRITICAL RULES:
+1. If the user mentions SPECIFIC creators, influencers, or people by name → include those EXACT people AND 5-10 similar creators from the SAME niche/country/language
+2. If the user mentions a country or culture (e.g. "Greek") → suggest REAL creators from that country who actually post in that language or about that culture
+3. Every suggestion with a platform must have a REAL URL: YouTube → https://youtube.com/@RealChannelName, Twitch → https://twitch.tv/realusername, TikTok → https://tiktok.com/@realusername
+4. Format: "CreatorName — short description of what they do" (e.g. "Agadmator — chess analysis with storytelling")
+5. Do NOT write generic descriptions like "Explore Greek culture" — use REAL creator names
+6. Max 3 general activity suggestions (no URL), the rest MUST be real creators
+7. At least 10 out of 15 should be directly related to what the user said in their answers
 
-URL formats:
-- YouTube: https://youtube.com/@ChannelName
-- Twitch: https://twitch.tv/username
-- TikTok: https://tiktok.com/@username
-- Chess: https://chess.com/...
-- General (no URL needed for activities)
-
-Return JSON array: [{"text": "short punchy description under 60 chars", "platform": "youtube|twitch|tiktok|chess|general", "url": "real_url_or_empty", "category": "influencer|gaming|creative|physical|learning|music|adventure|general"}]
-
-Rules:
-- Match the user's EXACT interests from their answers (if they mention Greek creators, suggest Greek creators)
-- Only real creators/content that actually exist
-- Mix of platforms based on what the user mentioned
-- Include some activity suggestions (general platform, no URL) that match their energy level
-- Short punchy descriptions (under 60 chars)
-- Diverse categories — don't repeat the same type`,
+Return ONLY a JSON array: [{"text": "CreatorName — what they do (under 60 chars)", "platform": "youtube|twitch|tiktok|chess|general", "url": "https://real-url", "category": "influencer|gaming|creative|physical|learning|music|adventure|general"}]`,
         },
       ],
     });
@@ -396,18 +388,18 @@ export async function generateSimilarSuggestions(
         },
         {
           role: "user",
-          content: `A user liked this suggestion: "${acceptedText}" (platform: ${platform}, category: ${category}).
+          content: `A user liked: "${acceptedText}" (platform: ${platform}, category: ${category}).
 
-Generate exactly 3 similar but different suggestions for the same platform. Each must have a REAL, working URL to an actual creator/content.
+Generate exactly 3 similar creators/content. Format: "CreatorName — what they do".
 ${urlHint ? `URL format: ${urlHint}` : ""}
 
-Return JSON array: [{"text": "short description", "platform": "${platform}", "url": "real_url", "category": "${category}"}]
+Return JSON array: [{"text": "CreatorName — description under 60 chars", "platform": "${platform}", "url": "real_url", "category": "${category}"}]
 
 Rules:
-- Only real creators/content that actually exist
-- Short punchy descriptions (under 60 chars)
-- Different from the original but same vibe
-- Real URLs only — no made-up usernames`,
+- REAL creator names with REAL URLs (no made-up names)
+- Same niche/vibe/country as the original
+- If original is a Greek creator, suggest other Greek creators
+- If original is a chess streamer, suggest other chess streamers`,
         },
       ],
     });
