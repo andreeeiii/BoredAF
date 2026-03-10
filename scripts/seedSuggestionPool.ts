@@ -6,7 +6,7 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../.env.local") });
 
 import { createClient } from "@supabase/supabase-js";
-import * as crypto from "crypto";
+import OpenAI from "openai";
 
 interface PoolSeed {
   text: string;
@@ -137,63 +137,87 @@ const SUGGESTIONS: PoolSeed[] = [
   { text: "Explore a part of your neighborhood you've never been to", category: "adventure", platform: "general", url: "" },
 ];
 
-function generatePlaceholderEmbedding(text: string, category: string): number[] {
-  const hash = crypto.createHash("sha256").update(`${category}:${text}`).digest();
-  const vec: number[] = [];
+async function generateRealEmbedding(openai: OpenAI, text: string): Promise<number[]> {
+  const response = await openai.embeddings.create({
+    model: "text-embedding-3-small",
+    input: text,
+    dimensions: 1536,
+  });
+  return response.data[0].embedding;
+}
 
-  for (let i = 0; i < 1536; i++) {
-    const byte = hash[i % hash.length];
-    const offset = (i * 7 + byte) % 256;
-    vec.push((offset / 255) * 2 - 1);
-  }
-
-  const magnitude = Math.sqrt(vec.reduce((sum, v) => sum + v * v, 0));
-  return vec.map((v) => v / magnitude);
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function main() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const openaiKey = process.env.OPENAI_API_KEY;
 
   if (!supabaseUrl || !supabaseKey) {
     console.error("Missing env vars: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY");
     process.exit(1);
   }
 
-  const supabase = createClient(supabaseUrl, supabaseKey);
+  if (!openaiKey) {
+    console.error("Missing OPENAI_API_KEY — real embeddings require OpenAI");
+    process.exit(1);
+  }
 
-  console.log(`Seeding ${SUGGESTIONS.length} suggestions with placeholder embeddings...`);
-  console.log(`(Using deterministic hash-based vectors — swap to OpenAI later for real semantics)\n`);
+  const supabase = createClient(supabaseUrl, supabaseKey);
+  const openai = new OpenAI({ apiKey: openaiKey });
+
+  // Clear existing pool data before re-seeding
+  console.log("Clearing existing suggestion_pool data...");
+  const { error: deleteErr } = await supabase.from("suggestion_pool").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  if (deleteErr) {
+    console.error("Failed to clear pool:", deleteErr.message);
+  } else {
+    console.log("Pool cleared.\n");
+  }
+
+  console.log(`Seeding ${SUGGESTIONS.length} suggestions with REAL OpenAI embeddings...`);
+  console.log(`(Using text-embedding-3-small — 1536 dimensions)\n`);
 
   let success = 0;
   let failed = 0;
 
   for (let i = 0; i < SUGGESTIONS.length; i++) {
     const s = SUGGESTIONS[i];
-    const embedding = generatePlaceholderEmbedding(s.text, s.category);
-    const embeddingStr = `[${embedding.join(",")}]`;
 
-    const { error } = await supabase.from("suggestion_pool").insert({
-      content_text: s.text,
-      category: s.category,
-      platform: s.platform,
-      url: s.url,
-      embedding: embeddingStr,
-    });
+    try {
+      const embedding = await generateRealEmbedding(openai, s.text);
+      const embeddingStr = `[${embedding.join(",")}]`;
 
-    if (error) {
-      console.error(`  FAIL: "${s.text.slice(0, 40)}..." — ${error.message}`);
+      const { error } = await supabase.from("suggestion_pool").insert({
+        content_text: s.text,
+        category: s.category,
+        platform: s.platform,
+        url: s.url,
+        embedding: embeddingStr,
+      });
+
+      if (error) {
+        console.error(`  FAIL: "${s.text.slice(0, 40)}..." — ${error.message}`);
+        failed++;
+      } else {
+        success++;
+      }
+    } catch (err) {
+      console.error(`  FAIL: "${s.text.slice(0, 40)}..." — ${err instanceof Error ? err.message : err}`);
       failed++;
-    } else {
-      success++;
     }
 
-    if ((i + 1) % 10 === 0 || i === SUGGESTIONS.length - 1) {
+    // Rate limit: small delay every 10 entries to avoid hitting OpenAI rate limits
+    if ((i + 1) % 10 === 0) {
+      await sleep(500);
       console.log(`  ${i + 1}/${SUGGESTIONS.length} done (${success} ok, ${failed} err)`);
     }
   }
 
-  console.log(`\nDone! ${success} seeded, ${failed} failed.`);
+  console.log(`  ${SUGGESTIONS.length}/${SUGGESTIONS.length} done (${success} ok, ${failed} err)`);
+  console.log(`\nDone! ${success} seeded with real embeddings, ${failed} failed.`);
 }
 
 main().catch(console.error);
