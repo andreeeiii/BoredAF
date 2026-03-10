@@ -51,7 +51,7 @@ export async function POST(request: Request) {
       }
 
       const mapping = await parsePersona(answers);
-      await saveOnboardingResult(userId, mapping);
+      await saveOnboardingResult(userId, mapping, answers);
 
       return NextResponse.json({
         success: true,

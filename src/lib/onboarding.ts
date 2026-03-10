@@ -2,7 +2,7 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import { z } from "zod";
 import { supabase } from "./supabase";
 import { mapToArchetype } from "./mood";
-import { buildPersonaText, generateAndStorePersonaEmbedding } from "./embeddings";
+import { buildPersonaText, generateAndStorePersonaEmbedding, seedPoolFromOnboarding } from "./embeddings";
 
 export const PersonaMappingSchema = z.object({
   archetype: z.string(),
@@ -102,7 +102,8 @@ function buildFallbackPersona(answers: OnboardingAnswer[]): PersonaMapping {
 
 export async function saveOnboardingResult(
   userId: string,
-  mapping: PersonaMapping
+  mapping: PersonaMapping,
+  answers: OnboardingAnswer[] = []
 ): Promise<void> {
   const coreArchetype = mapToArchetype(mapping.archetype);
 
@@ -175,6 +176,12 @@ export async function saveOnboardingResult(
   });
 
   await generateAndStorePersonaEmbedding(userId, personaText);
+
+  if (answers.length > 0) {
+    seedPoolFromOnboarding(answers, mapping).catch((err) =>
+      console.error("[BAF][OnboardingSeed] Non-blocking error:", err)
+    );
+  }
 }
 
 export async function isOnboardingComplete(userId: string): Promise<boolean> {

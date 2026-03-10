@@ -176,6 +176,43 @@ AI parses answers → maps to archetype + extracts interest tags + populates DB.
 - **Fallback Rescues**: 10 default activity suggestions if pool is empty AND APIs fail
 - **Dynamic Pool Engagement**: Every accept/reject updates `times_shown`/`times_accepted`/`times_rejected` counters on the pool entry
 
+## Post-Onboarding Pool Seeding (Personalized Day-One Content)
+
+After onboarding, the system generates **10–15 personalized suggestions** based on the user's 4 answers:
+
+```
+[ USER COMPLETES ONBOARDING ]
+  "I like Greek YouTube influencers, chess, and chill vibes"
+         │
+         ▼
+  seedPoolFromOnboarding(answers, mapping)
+         │
+         ▼
+  OpenAI Chat (gpt-4o-mini): "Generate 15 suggestions
+  matching these interests with real URLs"
+         │
+         ▼
+  [
+    { text: "Nile Red — chemistry experiments that blow your mind", platform: "youtube", url: "https://youtube.com/@NileRed" },
+    { text: "Agadmator — chess analysis with storytelling", platform: "youtube", url: "https://youtube.com/@agadmator" },
+    { text: "Fθrza — Greek gaming and vlogs", platform: "youtube", url: "https://youtube.com/@ForzaGreek" },
+    ...12 more tailored to user's exact interests
+  ]
+         │
+         ▼
+  For each: generateEmbedding() → INSERT into suggestion_pool (deduped)
+         │
+         ▼
+  User's first BAF press has content matching their exact taste!
+```
+
+### Rules
+- **Triggered once per user** — only during onboarding completion
+- **Non-blocking**: fire-and-forget, doesn't delay the onboarding flow
+- **Deduplication**: Skips if `content_text` or `url` already exists
+- **Shared pool**: New entries benefit ALL users with similar interests
+- **Cost**: ~1000 tokens per onboarding = $0.00005
+
 ## Dynamic Pool Expansion (Self-Growing Pool)
 
 When a user **accepts** a suggestion, the pool automatically expands with similar content:

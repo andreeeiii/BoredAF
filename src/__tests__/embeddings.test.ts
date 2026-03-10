@@ -167,3 +167,48 @@ describe("deactivateUnderperformingEntries filter logic", () => {
     expect(toDeactivate).toHaveLength(0);
   });
 });
+
+describe("OnboardingSeed suggestion parsing", () => {
+  it("filters out entries missing required fields", () => {
+    const raw = [
+      { text: "Greek YouTuber A", platform: "youtube", url: "https://youtube.com/@a", category: "influencer" },
+      { text: "", platform: "youtube", url: "https://youtube.com/@b", category: "influencer" },
+      { text: "Activity with no URL", platform: "general", url: "", category: "physical" },
+      { text: "Missing category", platform: "youtube", url: "https://youtube.com/@c", category: "" },
+    ];
+
+    const valid = raw
+      .filter((s) => s.text && s.platform && s.category)
+      .slice(0, 15);
+
+    expect(valid).toHaveLength(2);
+    expect(valid[0].text).toBe("Greek YouTuber A");
+    expect(valid[1].text).toBe("Activity with no URL");
+  });
+
+  it("limits to max 15 suggestions", () => {
+    const raw = Array.from({ length: 20 }, (_, i) => ({
+      text: `Suggestion ${i}`,
+      platform: "youtube",
+      url: `https://youtube.com/@test${i}`,
+      category: "influencer",
+    }));
+
+    const valid = raw
+      .filter((s) => s.text && s.platform && s.category)
+      .slice(0, 15);
+
+    expect(valid).toHaveLength(15);
+  });
+
+  it("handles activity suggestions with empty URLs", () => {
+    const raw = [
+      { text: "Go for a walk", platform: "general", url: "", category: "physical" },
+      { text: "Read a book", platform: "general", url: "", category: "learning" },
+    ];
+
+    const valid = raw.filter((s) => s.text && s.platform && s.category);
+    expect(valid).toHaveLength(2);
+    expect(valid[0].url).toBe("");
+  });
+});

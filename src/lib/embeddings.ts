@@ -240,6 +240,123 @@ export async function embedSuggestionPoolEntry(
   return data?.id ?? null;
 }
 
+export interface OnboardingAnswer {
+  slot: string;
+  question: string;
+  answer: string;
+}
+
+export interface OnboardingMapping {
+  archetype: string;
+  tags: string[];
+  personaData: { energy: string; focus: string };
+  extractedInterests: Array<{ platform: string; ref_id: string; weight: number }>;
+}
+
+export async function seedPoolFromOnboarding(
+  answers: OnboardingAnswer[],
+  mapping: OnboardingMapping
+): Promise<number> {
+  const openai = getOpenAI();
+  if (!openai) {
+    console.log("[BAF][OnboardingSeed] No OpenAI key — skipping pool seeding");
+    return 0;
+  }
+
+  const answersText = answers
+    .map((a) => `[${a.slot.toUpperCase()}] Q: "${a.question}" A: "${a.answer}"`)
+    .join("\n");
+
+  const interestsText = mapping.extractedInterests.length > 0
+    ? `Extracted interests: ${mapping.extractedInterests.map((i) => `${i.platform}/${i.ref_id}`).join(", ")}`
+    : "No specific interests extracted";
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0.9,
+      max_tokens: 2000,
+      messages: [
+        {
+          role: "system",
+          content: `You generate personalized content suggestions for an anti-boredom app called BAF. All suggestions must be family-friendly and safe for all ages. Return ONLY a JSON array, no markdown or explanation.`,
+        },
+        {
+          role: "user",
+          content: `A new user just completed onboarding. Based on their answers, generate 15 personalized suggestions they would love.
+
+User profile:
+- Archetype: ${mapping.archetype} (${mapping.archetype === "The Grind" ? "competitive, mastery-focused" : mapping.archetype === "The Chill" ? "relaxation, passive consumer" : "novelty seeker, curious"})
+- Energy: ${mapping.personaData.energy}, Focus: ${mapping.personaData.focus}
+- Tags: ${mapping.tags.join(", ")}
+- ${interestsText}
+
+Their onboarding answers:
+${answersText}
+
+Generate exactly 15 suggestions across multiple platforms. Each must have a REAL, working URL to actual content/creators.
+
+URL formats:
+- YouTube: https://youtube.com/@ChannelName
+- Twitch: https://twitch.tv/username
+- TikTok: https://tiktok.com/@username
+- Chess: https://chess.com/...
+- General (no URL needed for activities)
+
+Return JSON array: [{"text": "short punchy description under 60 chars", "platform": "youtube|twitch|tiktok|chess|general", "url": "real_url_or_empty", "category": "influencer|gaming|creative|physical|learning|music|adventure|general"}]
+
+Rules:
+- Match the user's EXACT interests from their answers (if they mention Greek creators, suggest Greek creators)
+- Only real creators/content that actually exist
+- Mix of platforms based on what the user mentioned
+- Include some activity suggestions (general platform, no URL) that match their energy level
+- Short punchy descriptions (under 60 chars)
+- Diverse categories — don't repeat the same type`,
+        },
+      ],
+    });
+
+    const content = response.choices[0]?.message?.content?.trim();
+    if (!content) return 0;
+
+    const cleaned = content.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
+    const parsed = JSON.parse(cleaned) as PoolExpansionSuggestion[];
+
+    if (!Array.isArray(parsed)) return 0;
+
+    const valid = parsed
+      .filter((s) => s.text && s.platform && s.category)
+      .slice(0, 15);
+
+    let inserted = 0;
+
+    for (const s of valid) {
+      const { data: existing } = await supabase
+        .from("suggestion_pool")
+        .select("id")
+        .or(`content_text.eq.${s.text}${s.url ? `,url.eq.${s.url}` : ""}`)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        console.log(`[BAF][OnboardingSeed] Skipped duplicate: "${s.text.slice(0, 40)}..."`);
+        continue;
+      }
+
+      const id = await embedSuggestionPoolEntry(s.text, s.category, s.platform, s.url || "");
+      if (id) {
+        inserted++;
+        console.log(`[BAF][OnboardingSeed] Added: "${s.text.slice(0, 40)}..." (${s.platform}) → ${id}`);
+      }
+    }
+
+    console.log(`[BAF][OnboardingSeed] Seeded ${inserted} personalized entries from onboarding`);
+    return inserted;
+  } catch (err) {
+    console.error("[BAF][OnboardingSeed] LLM error:", err instanceof Error ? err.message : err);
+    return 0;
+  }
+}
+
 export interface PoolExpansionSuggestion {
   text: string;
   platform: string;
