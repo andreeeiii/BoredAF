@@ -28,6 +28,7 @@ export const RescueSchema = z.object({
   viewerCount: z.number().nullable().optional(),
   gameName: z.string().nullable().optional(),
   poolId: z.string().nullable().optional(),
+  category: z.string().nullable().optional(),
 });
 
 export type Rescue = z.infer<typeof RescueSchema>;
@@ -232,6 +233,7 @@ async function reasoningNode(
         isLive: topItem.isLive,
         archetype: state.mood?.effectiveArchetype ?? "The Spark",
         poolId: (topItem.metadata?.poolId as string) ?? null,
+        category: (topItem.metadata?.category as string) ?? null,
       };
       return {
         finalRescue: enrichWithTwitchMeta(base, state.rankedContent ?? []),
@@ -385,6 +387,7 @@ Respond in EXACTLY this JSON format:
           isLive: fallbackItem.isLive,
           archetype,
           poolId: (fallbackItem.metadata?.poolId as string) ?? null,
+          category: (fallbackItem.metadata?.category as string) ?? null,
         };
         return {
           finalRescue: enrichWithTwitchMeta(base, ranked),
@@ -417,6 +420,7 @@ Respond in EXACTLY this JSON format:
         isLive: topItem.isLive,
         archetype,
         poolId: (topItem.metadata?.poolId as string) ?? null,
+        category: (topItem.metadata?.category as string) ?? null,
       };
       return {
         finalRescue: enrichWithTwitchMeta(base, state.rankedContent ?? []),
@@ -503,6 +507,7 @@ async function validationNode(
       isLive: matchingItem.isLive,
       archetype: state.mood?.effectiveArchetype ?? "The Spark",
       poolId: (matchingItem.metadata?.poolId as string) ?? null,
+      category: (matchingItem.metadata?.category as string) ?? null,
     };
     console.log(`[BAF][Validation] Re-rolled to "${matchingItem.platform}" — "${matchingItem.title}"`);
     return { finalRescue: enrichWithTwitchMeta(base, ranked) };

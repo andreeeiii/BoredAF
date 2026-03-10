@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     }
 
     if (action === "feedback") {
-      const { suggestion, outcome, reason, source, archetype, link, poolId } = body;
+      const { suggestion, outcome, reason, source, archetype, link, poolId, category } = body;
 
       await updatePersona(userId, {
         suggestion,
@@ -26,6 +26,7 @@ export async function POST(request: Request) {
         source,
         link,
         poolId,
+        category,
       });
 
       if (outcome === "rejected" && reason && source) {

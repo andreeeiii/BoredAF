@@ -176,6 +176,41 @@ AI parses answers → maps to archetype + extracts interest tags + populates DB.
 - **Fallback Rescues**: 10 default activity suggestions if pool is empty AND APIs fail
 - **Dynamic Pool Engagement**: Every accept/reject updates `times_shown`/`times_accepted`/`times_rejected` counters on the pool entry
 
+## Dynamic Pool Expansion (Self-Growing Pool)
+
+When a user **accepts** a suggestion, the pool automatically expands with similar content:
+
+```
+[ USER ACCEPTS "GothamChess live — learn chess while being entertained" ]
+         │
+         ▼
+  expandPoolFromAccept(acceptedText, platform, category)
+         │
+         ▼
+  OpenAI Chat (gpt-4o-mini): "Generate 3 similar suggestions
+  with real URLs for platform=twitch, category=influencer"
+         │
+         ▼
+  [
+    { text: "BotezLive — chess sisters with chaotic energy", platform: "twitch", url: "https://twitch.tv/botezlive" },
+    { text: "Eric Rosen — chill chess and traps", platform: "twitch", url: "https://twitch.tv/imrosen" },
+    { text: "Anna Cramling — chess with family vibes", platform: "twitch", url: "https://twitch.tv/annacramling" }
+  ]
+         │
+         ▼
+  For each: generateEmbedding() → INSERT into suggestion_pool
+         │
+         ▼
+  Pool grows organically from user taste!
+```
+
+### Rules
+- **Triggered on accept only** — rejections don't grow the pool (they shift persona away)
+- **Deduplication**: Skips if `content_text` or `url` already exists in pool
+- **Rate limit**: Max 3 new entries per accept, non-blocking (fire-and-forget)
+- **Deactivation**: Entries with >10 shows and <10% accept rate are marked `is_active = false`
+- **Cost**: ~500 tokens per expansion = $0.00001 per accept
+
 ## Semantic Persona Matching (pgvector)
 
 The Brain uses **pgvector** to turn user personality into a mathematical vector and find suggestions via cosine similarity.

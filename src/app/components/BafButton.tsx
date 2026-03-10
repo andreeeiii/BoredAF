@@ -17,6 +17,7 @@ interface Rescue {
   viewerCount?: number | null;
   gameName?: string | null;
   poolId?: string | null;
+  category?: string | null;
 }
 
 const WHY_REASONS = [
@@ -78,6 +79,9 @@ export default function BafButton() {
         outcome: "accepted",
         source: rescue.source,
         archetype: rescue.archetype,
+        link: rescue.link,
+        poolId: rescue.poolId,
+        category: rescue.category,
       }),
     });
 
@@ -104,6 +108,7 @@ export default function BafButton() {
         archetype: rescue.archetype,
         link: rescue.link,
         poolId: rescue.poolId,
+        category: rescue.category,
       }),
     });
 

@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { nudgePersonaVector, updatePoolEngagement } from "./embeddings";
+import { nudgePersonaVector, updatePoolEngagement, expandPoolFromAccept, deactivateUnderperformingEntries } from "./embeddings";
 
 export interface Persona {
   profile: {
@@ -34,6 +34,7 @@ export interface Feedback {
   source?: string;
   link?: string | null;
   poolId?: string | null;
+  category?: string | null;
 }
 
 export async function getPersona(userId: string): Promise<Persona> {
@@ -270,6 +271,20 @@ export async function updatePersona(
           .eq("ref_id", interest.ref_id);
       }
     }
+
+    if (feedback.source && feedback.source !== "fallback" && feedback.source !== "custom") {
+      expandPoolFromAccept(
+        feedback.suggestion,
+        feedback.source,
+        feedback.category ?? "general"
+      ).catch((err) =>
+        console.error("[BAF][PoolExpansion] Non-blocking error:", err)
+      );
+    }
+
+    deactivateUnderperformingEntries().catch((err) =>
+      console.error("[BAF][PoolCleanup] Non-blocking error:", err)
+    );
   }
 }
 

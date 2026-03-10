@@ -212,7 +212,9 @@ export async function updatePoolEngagement(
 
 export async function embedSuggestionPoolEntry(
   contentText: string,
-  category: string
+  category: string,
+  platform: string = "general",
+  url: string = ""
 ): Promise<string | null> {
   const embedding = await generateEmbedding(contentText);
   if (!embedding) return null;
@@ -223,6 +225,8 @@ export async function embedSuggestionPoolEntry(
     .insert({
       content_text: contentText,
       category,
+      platform,
+      url,
       embedding: embeddingStr,
     })
     .select("id")
@@ -234,4 +238,142 @@ export async function embedSuggestionPoolEntry(
   }
 
   return data?.id ?? null;
+}
+
+export interface PoolExpansionSuggestion {
+  text: string;
+  platform: string;
+  url: string;
+  category: string;
+}
+
+export async function generateSimilarSuggestions(
+  acceptedText: string,
+  platform: string,
+  category: string
+): Promise<PoolExpansionSuggestion[]> {
+  const openai = getOpenAI();
+  if (!openai) {
+    console.log("[BAF][PoolExpansion] No OpenAI key — skipping expansion");
+    return [];
+  }
+
+  const platformUrlExamples: Record<string, string> = {
+    twitch: "https://twitch.tv/username",
+    youtube: "https://youtube.com/@ChannelName",
+    tiktok: "https://tiktok.com/@username",
+    chess: "https://chess.com/...",
+  };
+
+  const urlHint = platformUrlExamples[platform] ?? "";
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0.9,
+      max_tokens: 500,
+      messages: [
+        {
+          role: "system",
+          content: `You generate content suggestions for an anti-boredom app. All suggestions must be family-friendly and safe for all ages. Return ONLY a JSON array, no markdown.`,
+        },
+        {
+          role: "user",
+          content: `A user liked this suggestion: "${acceptedText}" (platform: ${platform}, category: ${category}).
+
+Generate exactly 3 similar but different suggestions for the same platform. Each must have a REAL, working URL to an actual creator/content.
+${urlHint ? `URL format: ${urlHint}` : ""}
+
+Return JSON array: [{"text": "short description", "platform": "${platform}", "url": "real_url", "category": "${category}"}]
+
+Rules:
+- Only real creators/content that actually exist
+- Short punchy descriptions (under 60 chars)
+- Different from the original but same vibe
+- Real URLs only — no made-up usernames`,
+        },
+      ],
+    });
+
+    const content = response.choices[0]?.message?.content?.trim();
+    if (!content) return [];
+
+    const cleaned = content.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
+    const parsed = JSON.parse(cleaned) as PoolExpansionSuggestion[];
+
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .filter((s) => s.text && s.platform && s.url && s.category)
+      .slice(0, 3);
+  } catch (err) {
+    console.error("[BAF][PoolExpansion] LLM error:", err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+export async function expandPoolFromAccept(
+  acceptedText: string,
+  platform: string,
+  category: string
+): Promise<number> {
+  const suggestions = await generateSimilarSuggestions(acceptedText, platform, category);
+  if (suggestions.length === 0) return 0;
+
+  let inserted = 0;
+
+  for (const s of suggestions) {
+    const { data: existing } = await supabase
+      .from("suggestion_pool")
+      .select("id")
+      .or(`content_text.eq.${s.text},url.eq.${s.url}`)
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      console.log(`[BAF][PoolExpansion] Skipped duplicate: "${s.text.slice(0, 40)}..."`);
+      continue;
+    }
+
+    const id = await embedSuggestionPoolEntry(s.text, s.category, s.platform, s.url);
+    if (id) {
+      inserted++;
+      console.log(`[BAF][PoolExpansion] Added: "${s.text.slice(0, 40)}..." (${s.platform}) → ${id}`);
+    }
+  }
+
+  console.log(`[BAF][PoolExpansion] Expanded pool by ${inserted} entries from "${acceptedText.slice(0, 40)}..."`);
+  return inserted;
+}
+
+export async function deactivateUnderperformingEntries(): Promise<number> {
+  const { data: candidates, error: fetchErr } = await supabase
+    .from("suggestion_pool")
+    .select("id, times_shown, times_accepted")
+    .eq("is_active", true)
+    .gt("times_shown", 10);
+
+  if (fetchErr || !candidates) {
+    console.error("[BAF][PoolCleanup] Failed to fetch candidates:", fetchErr?.message);
+    return 0;
+  }
+
+  const toDeactivate = candidates.filter(
+    (e) => e.times_shown > 0 && e.times_accepted / e.times_shown < 0.1
+  );
+
+  if (toDeactivate.length === 0) return 0;
+
+  const ids = toDeactivate.map((e) => e.id);
+  const { error: updateErr } = await supabase
+    .from("suggestion_pool")
+    .update({ is_active: false })
+    .in("id", ids);
+
+  if (updateErr) {
+    console.error("[BAF][PoolCleanup] Failed to deactivate:", updateErr.message);
+    return 0;
+  }
+
+  console.log(`[BAF][PoolCleanup] Deactivated ${ids.length} underperforming entries (<10% accept rate)`);
+  return ids.length;
 }
