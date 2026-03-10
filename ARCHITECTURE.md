@@ -25,35 +25,43 @@ BAF is an AI-powered anti-boredom app. The user presses the **BAF** button when 
    │
    ▼ (1) PRESSES "BAF" BUTTON
    │
-┌──────────────────────────────────────────┐
-│         (2) THE BRAIN (LangGraph)        │
-│   Context → Parallel Fetch → Reasoning   │
-│   Archetype + Mood Sensor + Tools Data   │
-└────────┬────────────────────────┬────────┘
-         │                        │
-         ▼ <─── (3) MEMORY ───>   ▼ <─── (4) TOOLS ───>
-   [ PERSONA DATA ]          [ REAL-TIME WORLD ]
-   - Archetype: The Grind    - YouTube: Last 24h videos
-   - Chess ELO: 420          - Chess.com: ELO + Puzzle
-   - Mood: Tired → Chill     - Platform rotation check
-   - Negative signals        │
-         │                        │
-         └───────────┬────────────┘
-                     ▼
-            (5) THE SUGGESTION
-      "GothamChess dropped a new video!"
-      [🔗 youtube.com/watch?v=...]
-                     │
-            ┌────────┴────────┐
-            ▼                 ▼
-       [ LFG 🔥 ]        [ Nah 👎 ]
-    (Opens link +       (Why? → logs
-     logs accept)       negative signal
-            │           + new suggestion)
-            └────────┬────────┘
-                     ▼
-            (6) PERSONA UPDATED
-      (Archetype, mood, weights adjust)
+┌─────────────────────────────────────────────────────┐
+│              (2) THE BRAIN (LangGraph)              │
+│  Context → Parallel Fetch → Ranking → Reasoning     │
+│  Archetype + Mood + 4 Tools + Priority Scoring      │
+└────────┬───────────────────────────────────┬────────┘
+         │                                   │
+         ▼ <─── (3) MEMORY ───>              ▼ <─── (4) TOOLS ───>
+   [ PERSONA DATA ]                    [ REAL-TIME WORLD ]
+   - Archetype: The Grind             - YouTube: Last 24h videos
+   - Chess ELO: 420                   - Twitch: LIVE streams ← 🔴
+   - Mood: Tired → Chill              - TikTok: Deep links
+   - Negative signals                 - Chess.com: ELO + Puzzle
+         │                                   │
+         └──────────────┬────────────────────┘
+                        ▼
+               (5) RANKING NODE
+         Score each item by archetype:
+         Grind → Chess +30, YouTube +15
+         Chill → Twitch +20, TikTok +15
+         Spark → Least-used platform +25
+         LIVE streams → +50 for Chill/Spark
+                        │
+                        ▼
+               (6) THE SUGGESTION
+         "GothamChess is LIVE — 5K watching!"
+         [🔗 twitch.tv/gothamchess] 🔴 LIVE NOW
+                        │
+               ┌────────┴────────┐
+               ▼                 ▼
+          [ LFG 🔥 ]        [ Nah 👎 ]
+       (Opens link +       (Why? → logs
+        logs accept +      negative signal
+        archetype used)    + new suggestion)
+               └────────┬────────┘
+                        ▼
+               (7) PERSONA UPDATED
+         baf_history tracks archetype used
 ```
 
 ## Mood Sensor
@@ -63,6 +71,26 @@ The Brain doesn't just use the stored archetype — it uses a **real-time mood o
 - **Rejection streaks**: 3+ consecutive Nahs → shift to The Spark (novelty mode)
 - **Tired signals**: "Too tired" rejection reason → temporarily The Chill for 1 hour
 - **Platform rotation**: Never suggest the same platform 3 times in a row
+
+## Tool Registry (4 Parallel Tools)
+
+| Tool | API | Data Retrieved |
+|------|-----|---------------|
+| **YouTube** | YouTube Data API v3 | Last 24h videos from favorite channels (with clickable URLs) |
+| **Twitch** | Twitch Helix API | Live stream status, viewer count, game name, stream title |
+| **TikTok** | Deep Link Generator | Direct profile URLs for favorite TikTok creators |
+| **Chess** | Chess.com PubAPI | Current ELO, daily puzzle URL + title |
+
+All tools run **in parallel** via `Promise.all`. Every tool output is Zod-validated.
+
+## Ranking Engine
+
+After fetching, a **ranking node** scores each piece of content:
+- Base scores: YouTube 30, Chess 25, TikTok 20, Twitch offline 10
+- **LIVE bonus**: +50 for Chill and Spark archetypes
+- **Archetype bonuses**: Grind → Chess +30; Chill → Twitch +20; Spark → least-used +25
+- **Platform rotation penalty**: -40 if same platform 3x in a row
+- **Duplicate penalty**: -100 if content matches previous suggestion
 
 ## Dynamic Onboarding
 
@@ -86,9 +114,14 @@ AI parses answers → maps to archetype + extracts interest tags + populates DB.
 - **Archetype-Based Reasoning**: Different strategies for Grind/Chill/Spark users
 - **Mood Sensor**: Time-of-day, energy, rejection streaks dynamically shift archetype
 - **Negative Signals**: Rejection reasons logged per category, adjusting future suggestions
-- **No-Repeat Engine**: Full history check + server-side duplicate detection
+- **No-Repeat Engine**: Full history check + server-side duplicate detection + unique request IDs
 - **Platform Rotation**: Never suggests same platform 3x in a row
-- **YouTube Links**: Actual video URLs from user's favorite channels (last 24h)
+- **Ranking Engine**: Priority scoring per archetype, LIVE +50 bonus, duplicate penalties
+- **4-Tool Parallel Fetch**: YouTube, Twitch, TikTok, Chess all fetched simultaneously
+- **LIVE Detection**: Twitch streams get glowing "LIVE NOW" badge + priority boost
+- **Forced Links**: Every suggestion includes a clickable URL from real content
+- **Platform Icons**: Color-coded per platform (YouTube red, Twitch purple, TikTok, Chess green)
+- **Archetype Tracking**: Every baf_history entry records which archetype was used
 - **Family-Friendly**: All suggestions appropriate for all ages
 - **Fallback Rescues**: 10 default suggestions if APIs fail
 
@@ -97,6 +130,6 @@ AI parses answers → maps to archetype + extracts interest tags + populates DB.
 - **Frontend**: Next.js 14 + Tailwind CSS + Framer Motion + TypeScript
 - **Database**: Supabase Cloud (PostgreSQL + JSONB)
 - **AI Brain**: LangGraph + Claude 3.5 Sonnet (Anthropic)
-- **Real-Time Tools**: YouTube Data API v3 + Chess.com PubAPI
+- **Real-Time Tools**: YouTube Data API v3 + Twitch Helix API + TikTok Deep Links + Chess.com PubAPI
 - **Validation**: Zod schemas on all tool outputs
-- **Testing**: Jest + React Testing Library (54 tests across 7 suites)
+- **Testing**: Jest + React Testing Library (74 tests across 9 suites)

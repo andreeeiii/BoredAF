@@ -34,6 +34,8 @@ describe("BafButton", () => {
         vibe: "chill",
         source: "youtube",
         link: "https://youtube.com/watch?v=abc123",
+        isLive: false,
+        archetype: "The Grind",
       }),
     });
 
@@ -46,6 +48,30 @@ describe("BafButton", () => {
 
     expect(screen.getByText(/LFG/)).toBeInTheDocument();
     expect(screen.getByText(/Nah/)).toBeInTheDocument();
+    expect(screen.getByText(/YouTube/)).toBeInTheDocument();
+  });
+
+  it("shows LIVE badge for live suggestions", async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        suggestion: "GothamChess is streaming right now!",
+        emoji: "🔴",
+        vibe: "live",
+        source: "twitch",
+        link: "https://twitch.tv/gothamchess",
+        isLive: true,
+        archetype: "The Chill",
+      }),
+    });
+
+    render(<BafButton />);
+    fireEvent.click(screen.getByRole("button", { name: /get a suggestion/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Live Now")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Twitch/)).toBeInTheDocument();
   });
 
   it("shows why menu when Nah is clicked", async () => {
@@ -57,6 +83,8 @@ describe("BafButton", () => {
         vibe: "active",
         source: "chess",
         link: null,
+        isLive: false,
+        archetype: "The Grind",
       }),
     });
 

@@ -14,7 +14,9 @@ INSERT INTO public.interests (user_id, platform, ref_id, weight)
 VALUES
   ('00000000-0000-0000-0000-000000000000', 'youtube', 'UCsn6YST89nS_IAn7S_S00S', 10),
   ('00000000-0000-0000-0000-000000000000', 'youtube', 'UC16niRr50-MSBwiO3YDb3RA', 8),
-  ('00000000-0000-0000-0000-000000000000', 'twitch', 'gothamchess', 5)
+  ('00000000-0000-0000-0000-000000000000', 'twitch', 'gothamchess', 7),
+  ('00000000-0000-0000-0000-000000000000', 'twitch', 'hikaru', 5),
+  ('00000000-0000-0000-0000-000000000000', 'tiktok', 'gothamchess', 4)
 ON CONFLICT (user_id, platform, ref_id) DO NOTHING;
 
 INSERT INTO public.baf_history (user_id, suggestion, outcome, reason)

@@ -11,6 +11,8 @@ interface Rescue {
   vibe: string;
   source: string;
   link: string | null;
+  isLive?: boolean;
+  archetype?: string;
 }
 
 const WHY_REASONS = [
@@ -19,6 +21,15 @@ const WHY_REASONS = [
   { label: "Already did that", value: "already did that" },
   { label: "Something else", value: "other" },
 ];
+
+const PLATFORM_STYLES: Record<string, { color: string; icon: string; label: string }> = {
+  youtube: { color: "text-red-500", icon: "▶", label: "YouTube" },
+  twitch: { color: "text-purple-400", icon: "◉", label: "Twitch" },
+  tiktok: { color: "text-white", icon: "♪", label: "TikTok" },
+  chess: { color: "text-green-400", icon: "♟", label: "Chess" },
+  fallback: { color: "text-neutral-400", icon: "✦", label: "BAF" },
+  custom: { color: "text-yellow-400", icon: "★", label: "Custom" },
+};
 
 export default function BafButton() {
   const [state, setState] = useState<BafState>("idle");
@@ -62,6 +73,7 @@ export default function BafButton() {
         suggestion: rescue.suggestion,
         outcome: "accepted",
         source: rescue.source,
+        archetype: rescue.archetype,
       }),
     });
 
@@ -85,6 +97,7 @@ export default function BafButton() {
         outcome: "rejected",
         reason,
         source: rescue.source,
+        archetype: rescue.archetype,
       }),
     });
 
@@ -107,6 +120,10 @@ export default function BafButton() {
       setState("idle");
     }
   };
+
+  const platformStyle = rescue
+    ? PLATFORM_STYLES[rescue.source] ?? PLATFORM_STYLES.custom
+    : null;
 
   return (
     <div className="flex flex-col items-center gap-8 min-h-[400px] justify-center">
@@ -170,6 +187,18 @@ export default function BafButton() {
             exit={{ y: -20, opacity: 0 }}
             className="flex flex-col items-center gap-6 max-w-md text-center"
           >
+            {rescue.isLive && (
+              <motion.div
+                className="flex items-center gap-2 px-4 py-1 rounded-full bg-red-600/20 border border-red-500/50"
+                animate={{ opacity: [1, 0.6, 1] }}
+                transition={{ duration: 1.5, repeat: Infinity }}
+              >
+                <span className="w-2 h-2 rounded-full bg-red-500" />
+                <span className="text-red-400 text-xs font-bold uppercase tracking-widest">
+                  Live Now
+                </span>
+              </motion.div>
+            )}
             <motion.span
               className="text-6xl"
               animate={{ rotate: [0, -10, 10, -10, 0] }}
@@ -180,17 +209,34 @@ export default function BafButton() {
             <p className="text-white text-xl font-semibold leading-relaxed">
               {rescue.suggestion}
             </p>
-            <span className="text-neutral-500 text-xs uppercase tracking-widest">
-              {rescue.vibe} • {rescue.source}
-            </span>
+            <div className="flex items-center gap-2">
+              {platformStyle && (
+                <span className={`text-lg ${platformStyle.color}`}>
+                  {platformStyle.icon}
+                </span>
+              )}
+              <span className="text-neutral-500 text-xs uppercase tracking-widest">
+                {platformStyle?.label ?? rescue.source} • {rescue.vibe}
+              </span>
+            </div>
             {rescue.link && (
               <a
                 href={rescue.link}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-blue-400 text-xs hover:text-blue-300 underline transition-colors"
+                className={`text-sm hover:opacity-80 underline transition-colors font-medium ${
+                  rescue.source === "twitch"
+                    ? "text-purple-400"
+                    : rescue.source === "youtube"
+                    ? "text-red-400"
+                    : rescue.source === "tiktok"
+                    ? "text-white"
+                    : rescue.source === "chess"
+                    ? "text-green-400"
+                    : "text-blue-400"
+                }`}
               >
-                {rescue.link.length > 50 ? rescue.link.slice(0, 50) + "..." : rescue.link}
+                {rescue.link.length > 55 ? rescue.link.slice(0, 55) + "..." : rescue.link}
               </a>
             )}
             <div className="flex gap-4 mt-2">

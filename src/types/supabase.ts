@@ -95,6 +95,8 @@ export interface Database {
           suggestion: string;
           outcome: "accepted" | "rejected";
           reason: string | null;
+          archetype: string | null;
+          source: string | null;
           created_at: string;
         };
         Insert: {
@@ -103,6 +105,8 @@ export interface Database {
           suggestion: string;
           outcome: "accepted" | "rejected";
           reason?: string | null;
+          archetype?: string | null;
+          source?: string | null;
           created_at?: string;
         };
         Update: {
@@ -111,6 +115,8 @@ export interface Database {
           suggestion?: string;
           outcome?: "accepted" | "rejected";
           reason?: string | null;
+          archetype?: string | null;
+          source?: string | null;
           created_at?: string;
         };
         Relationships: [

@@ -16,12 +16,14 @@ export async function POST(request: Request) {
     }
 
     if (action === "feedback") {
-      const { suggestion, outcome, reason, source } = body;
+      const { suggestion, outcome, reason, source, archetype } = body;
 
       await updatePersona(userId, {
         suggestion,
         outcome,
         reason,
+        archetype,
+        source,
       });
 
       if (outcome === "rejected" && reason && source) {

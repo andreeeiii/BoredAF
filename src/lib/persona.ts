@@ -25,6 +25,8 @@ export interface Feedback {
   suggestion: string;
   outcome: "accepted" | "rejected";
   reason?: string;
+  archetype?: string;
+  source?: string;
 }
 
 export async function getPersona(userId: string): Promise<Persona> {
@@ -77,6 +79,8 @@ export async function updatePersona(
     suggestion: feedback.suggestion,
     outcome: feedback.outcome,
     reason: feedback.reason ?? null,
+    archetype: feedback.archetype ?? null,
+    source: feedback.source ?? null,
   });
 
   if (historyError) throw new Error(historyError.message);
