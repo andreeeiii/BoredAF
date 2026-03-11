@@ -13,6 +13,7 @@ import { computeCategoryWeights, type CategoryWeights } from "./circuitBreaker";
 import { searchSemanticSuggestions, fetchPopularSuggestions, type SemanticMatch } from "../embeddings";
 import {
   fetchTwitchStreams,
+  fetchTwitchUsers,
   type TwitchStream,
 } from "../tools/socialTools";
 
@@ -138,11 +139,45 @@ async function poolFetchNode(
 
   let liveStreams: TwitchStream[] = [];
   if (twitchUsernames.length > 0) {
+    const uniqueUsernames = Array.from(new Set(twitchUsernames));
     try {
-      const twitchResult = await fetchTwitchStreams(Array.from(new Set(twitchUsernames)));
+      // Fetch streams + user profiles in parallel (no extra latency)
+      const [twitchResult, usersResult] = await Promise.all([
+        fetchTwitchStreams(uniqueUsernames),
+        fetchTwitchUsers(uniqueUsernames),
+      ]);
+
       liveStreams = twitchResult.streams.filter((s) => s.isLive);
       if (liveStreams.length > 0) {
         console.log(`[BAF][LiveEnrich] ${liveStreams.length} Twitch streamers are LIVE: ${liveStreams.map((s) => s.username).join(", ")}`);
+      }
+
+      // Filter out regular users (broadcaster_type === "") — these are tiny accounts
+      if (usersResult.users.length > 0) {
+        const validUsernames = new Set(
+          usersResult.users
+            .filter((u) => u.broadcasterType === "partner" || u.broadcasterType === "affiliate")
+            .map((u) => u.login)
+        );
+        const rejected = usersResult.users.filter((u) => u.broadcasterType === "");
+        if (rejected.length > 0) {
+          console.log(`[BAF][TwitchFilter] Removed ${rejected.length} non-affiliate/partner accounts: ${rejected.map((u) => u.login).join(", ")}`);
+        }
+
+        // Remove non-affiliate/partner Twitch entries from pool suggestions
+        poolSuggestions = poolSuggestions.filter((s) => {
+          if (s.platform !== "twitch" || !s.url) return true;
+          const match = s.url.match(/twitch\.tv\/([^/?]+)/);
+          if (!match) return true;
+          const username = match[1].toLowerCase();
+          // If the API didn't return this user at all (doesn't exist), filter out
+          const foundInApi = usersResult.users.some((u) => u.login === username);
+          if (!foundInApi) {
+            console.log(`[BAF][TwitchFilter] User "${username}" not found on Twitch — filtered`);
+            return false;
+          }
+          return validUsernames.has(username);
+        });
       }
     } catch (err) {
       console.error(`[BAF][LiveEnrich] Twitch check failed:`, err instanceof Error ? err.message : err);

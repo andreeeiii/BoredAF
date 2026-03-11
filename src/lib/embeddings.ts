@@ -317,15 +317,15 @@ Return ONLY a JSON array: [{"text": "CreatorName — what they do (under 60 char
 
     if (!Array.isArray(parsed)) return 0;
 
-    const MIN_FOLLOWERS = 10_000;
+    const MIN_FOLLOWERS = 50_000;
     const valid = parsed
       .filter((s) => {
         if (!s.text || !s.platform || !s.category) return false;
         // General activities (no URL) don't need follower check
         if (s.platform === "general") return true;
-        // Filter out creators with too few followers (likely wrong account)
-        if (s.followers_approx !== undefined && s.followers_approx < MIN_FOLLOWERS) {
-          console.log(`[BAF][OnboardingSeed] Filtered low-follower: "${s.text.slice(0, 40)}..." (${s.followers_approx} followers)`);
+        // Require followers_approx for platform-specific entries
+        if (s.followers_approx === undefined || s.followers_approx < MIN_FOLLOWERS) {
+          console.log(`[BAF][OnboardingSeed] Filtered low/missing followers: "${s.text.slice(0, 40)}..." (${s.followers_approx ?? "unknown"} followers)`);
           return false;
         }
         return true;
@@ -426,12 +426,13 @@ Rules:
 
     if (!Array.isArray(parsed)) return [];
 
-    const MIN_FOLLOWERS = 10_000;
+    const MIN_FOLLOWERS = 50_000;
     return parsed
       .filter((s) => {
         if (!s.text || !s.platform || !s.url || !s.category) return false;
-        if (s.followers_approx !== undefined && s.followers_approx < MIN_FOLLOWERS) {
-          console.log(`[BAF][PoolExpansion] Filtered low-follower: "${s.text.slice(0, 40)}..." (${s.followers_approx})`);
+        // Require followers_approx for all platform-specific entries
+        if (s.followers_approx === undefined || s.followers_approx < MIN_FOLLOWERS) {
+          console.log(`[BAF][PoolExpansion] Filtered low/missing followers: "${s.text.slice(0, 40)}..." (${s.followers_approx ?? "unknown"})`);
           return false;
         }
         return true;
@@ -528,13 +529,14 @@ Return JSON array: [{"text": "CreatorName — description under 60 chars", "plat
     const parsed = JSON.parse(cleaned) as PoolExpansionSuggestion[];
     if (!Array.isArray(parsed)) return 0;
 
-    const MIN_FOLLOWERS = 10_000;
+    const MIN_FOLLOWERS = 50_000;
     const valid = parsed
       .filter((s) => {
         if (!s.text || !s.platform || !s.category) return false;
         if (s.platform === "general") return true;
-        if (s.followers_approx !== undefined && s.followers_approx < MIN_FOLLOWERS) {
-          console.log(`[BAF][RejectExpansion] Filtered low-follower: "${s.text.slice(0, 40)}..." (${s.followers_approx})`);
+        // Require followers_approx for all platform-specific entries
+        if (s.followers_approx === undefined || s.followers_approx < MIN_FOLLOWERS) {
+          console.log(`[BAF][RejectExpansion] Filtered low/missing followers: "${s.text.slice(0, 40)}..." (${s.followers_approx ?? "unknown"})`);
           return false;
         }
         return true;

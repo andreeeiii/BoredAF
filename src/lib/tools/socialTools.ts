@@ -128,6 +128,73 @@ export async function fetchTwitchStreams(
   }
 }
 
+export const TwitchUserSchema = z.object({
+  id: z.string(),
+  login: z.string(),
+  displayName: z.string(),
+  broadcasterType: z.enum(["partner", "affiliate", ""]),
+});
+
+export type TwitchUser = z.infer<typeof TwitchUserSchema>;
+
+/**
+ * Fetch Twitch user profiles to check broadcaster_type.
+ * - "partner" = established streamer (high bar)
+ * - "affiliate" = at least 50 followers + streaming history
+ * - "" = regular user (likely tiny account — 3 followers etc.)
+ *
+ * Returns only users that exist on Twitch. Missing usernames are omitted.
+ */
+export async function fetchTwitchUsers(
+  usernames: string[]
+): Promise<{ users: TwitchUser[]; error: string | null }> {
+  const clientId = process.env.TWITCH_CLIENT_ID;
+  const accessToken = process.env.TWITCH_ACCESS_TOKEN;
+
+  if (!clientId || !accessToken) {
+    return { users: [], error: "Twitch API keys not configured" };
+  }
+
+  try {
+    const params = new URLSearchParams();
+    for (const username of usernames.slice(0, 100)) {
+      params.append("login", username);
+    }
+
+    const res = await fetch(
+      `https://api.twitch.tv/helix/users?${params}`,
+      {
+        headers: {
+          "Client-ID": clientId,
+          Authorization: `Bearer ${accessToken}`,
+        },
+        next: { revalidate: 300 },
+      }
+    );
+
+    if (!res.ok) {
+      throw new Error(`Twitch Users API ${res.status}`);
+    }
+
+    const data = await res.json();
+    const users: TwitchUser[] = (data.data ?? []).map(
+      (u: { id: string; login: string; display_name: string; broadcaster_type: string }) => ({
+        id: u.id,
+        login: u.login.toLowerCase(),
+        displayName: u.display_name,
+        broadcasterType: u.broadcaster_type || "",
+      })
+    );
+
+    return { users, error: null };
+  } catch (err) {
+    return {
+      users: [],
+      error: err instanceof Error ? err.message : "Twitch user fetch failed",
+    };
+  }
+}
+
 export function fetchTikTokLinks(usernames: string[]): TikTokResult {
   const links: TikTokLink[] = usernames.slice(0, 5).map((username) => ({
     platform: "tiktok" as const,
