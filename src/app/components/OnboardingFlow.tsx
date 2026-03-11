@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   getRandomOnboardingSet,
   type OnboardingQuestion,
 } from "@/constants/onboarding";
+
+type OnboardingPhase = "chat" | "building" | "result";
 
 interface OnboardingFlowProps {
   onComplete: () => void;
@@ -16,6 +18,16 @@ interface ChatMessage {
   text: string;
 }
 
+const BUILDING_STATUS_TEXTS = [
+  "Scanning interests...",
+  "Analyzing vibes...",
+  "Mapping vectors...",
+  "Calculating escape hatches...",
+  "Building your persona...",
+];
+
+const MIN_BUILDING_DURATION_MS = 2500;
+
 export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
   const [questions] = useState<OnboardingQuestion[]>(getRandomOnboardingSet);
   const [currentStep, setCurrentStep] = useState(0);
@@ -25,12 +37,23 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
   >([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
-  const [generatingPersona, setGeneratingPersona] = useState(false);
+  const [phase, setPhase] = useState<OnboardingPhase>("chat");
+  const [buildingStatusIndex, setBuildingStatusIndex] = useState(0);
   const [result, setResult] = useState<{
     archetype: string;
     tags: string[];
   } | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const pendingResult = useRef<{ archetype: string; tags: string[] } | null>(null);
+  const timerDone = useRef(false);
+  const apiDone = useRef(false);
+
+  const tryTransitionToResult = useCallback(() => {
+    if (apiDone.current && timerDone.current && pendingResult.current) {
+      setResult(pendingResult.current);
+      setPhase("result");
+    }
+  }, []);
 
   useEffect(() => {
     if (questions.length > 0 && messages.length === 0) {
@@ -48,6 +71,14 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    if (phase !== "building") return;
+    const interval = setInterval(() => {
+      setBuildingStatusIndex((prev) => (prev + 1) % BUILDING_STATUS_TEXTS.length);
+    }, 600);
+    return () => clearInterval(interval);
+  }, [phase]);
 
   const handleSubmitAnswer = async () => {
     if (!input.trim() || loading) return;
@@ -80,11 +111,16 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
       ]);
       setLoading(false);
     } else {
-      setGeneratingPersona(true);
-      setMessages((prev) => [
-        ...prev,
-        { type: "bot", text: "Generating your Escape Hatch... 🚀" },
-      ]);
+      setPhase("building");
+      setBuildingStatusIndex(0);
+      timerDone.current = false;
+      apiDone.current = false;
+      pendingResult.current = null;
+
+      setTimeout(() => {
+        timerDone.current = true;
+        tryTransitionToResult();
+      }, MIN_BUILDING_DURATION_MS);
 
       try {
         const res = await fetch("/api/onboarding", {
@@ -96,10 +132,13 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
         if (!res.ok) throw new Error("Failed to save");
 
         const data = await res.json();
-        setResult({ archetype: data.archetype, tags: data.tags });
+        pendingResult.current = { archetype: data.archetype, tags: data.tags };
       } catch {
-        setResult({ archetype: "The Explorer", tags: ["curious"] });
+        pendingResult.current = { archetype: "The Explorer", tags: ["curious"] };
       }
+
+      apiDone.current = true;
+      tryTransitionToResult();
     }
   };
 
@@ -110,12 +149,104 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
     }
   };
 
-  if (result) {
+  if (phase === "building") {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="flex flex-col items-center justify-center gap-8 min-h-[400px]"
+        data-testid="building-persona"
+      >
+        <div className="relative flex items-center justify-center">
+          <motion.div
+            className="absolute w-32 h-32 rounded-full bg-red-600/20"
+            animate={{
+              scale: [1, 1.4, 1],
+              opacity: [0.3, 0.1, 0.3],
+            }}
+            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+          />
+          <motion.div
+            className="absolute w-24 h-24 rounded-full bg-red-500/30"
+            animate={{
+              scale: [1.2, 1, 1.2],
+              opacity: [0.2, 0.4, 0.2],
+            }}
+            transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+          />
+          <motion.div
+            className="relative w-16 h-16 rounded-full border-2 border-red-500
+              flex items-center justify-center"
+            animate={{ rotate: 360 }}
+            transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+          >
+            <motion.div
+              className="w-3 h-3 rounded-full bg-red-500"
+              animate={{ scale: [1, 1.3, 1] }}
+              transition={{ duration: 0.8, repeat: Infinity }}
+            />
+          </motion.div>
+          <svg className="absolute w-20 h-20" viewBox="0 0 80 80">
+            <motion.circle
+              cx="40" cy="40" r="36"
+              fill="none" stroke="#ef4444" strokeWidth="2"
+              strokeLinecap="round"
+              strokeDasharray="226"
+              initial={{ strokeDashoffset: 226 }}
+              animate={{ strokeDashoffset: 0 }}
+              transition={{ duration: 2.5, ease: "easeInOut" }}
+            />
+          </svg>
+        </div>
+
+        <div className="flex flex-col items-center gap-3">
+          <h2 className="text-white text-xl font-bold tracking-wide">
+            Building Your Persona
+          </h2>
+          <AnimatePresence mode="wait">
+            <motion.p
+              key={buildingStatusIndex}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.25 }}
+              className="text-neutral-400 text-sm h-5"
+              data-testid="building-status"
+            >
+              {BUILDING_STATUS_TEXTS[buildingStatusIndex]}
+            </motion.p>
+          </AnimatePresence>
+        </div>
+
+        <div className="flex gap-1.5 mt-2">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <motion.div
+              key={i}
+              className="w-2 h-2 rounded-full bg-red-600"
+              animate={{
+                scale: [1, 1.5, 1],
+                opacity: [0.3, 1, 0.3],
+              }}
+              transition={{
+                duration: 1,
+                repeat: Infinity,
+                delay: i * 0.15,
+              }}
+            />
+          ))}
+        </div>
+      </motion.div>
+    );
+  }
+
+  if (phase === "result" && result) {
     return (
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         className="flex flex-col items-center gap-6 max-w-md text-center"
+        data-testid="result-screen"
       >
         <motion.span
           className="text-7xl"
@@ -152,7 +283,7 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
     );
   }
 
-  const progress = ((currentStep + (generatingPersona ? 1 : 0)) / questions.length) * 100;
+  const progress = ((currentStep + (phase !== "chat" ? 1 : 0)) / questions.length) * 100;
 
   return (
     <div className="flex flex-col w-full max-w-lg mx-auto h-[500px]">
@@ -212,7 +343,7 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
         <div ref={chatEndRef} />
       </div>
 
-      {!generatingPersona && (
+      {phase === "chat" && (
         <div className="flex gap-2">
           <input
             type="text"

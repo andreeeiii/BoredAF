@@ -54,7 +54,7 @@ describe("OnboardingFlow", () => {
     });
   });
 
-  it("shows generating state after 4 answers", async () => {
+  it("shows building persona screen after 4 answers", async () => {
     (global.fetch as jest.Mock).mockImplementation(
       () => new Promise(() => {})
     );
@@ -71,11 +71,15 @@ describe("OnboardingFlow", () => {
     }
 
     await waitFor(() => {
-      expect(screen.getByText(/Generating your Escape Hatch/)).toBeInTheDocument();
+      expect(screen.getByTestId("building-persona")).toBeInTheDocument();
     });
+
+    expect(screen.getByText("Building Your Persona")).toBeInTheDocument();
+    expect(screen.getByTestId("building-status")).toBeInTheDocument();
   });
 
   it("shows archetype result after submission", async () => {
+    jest.useFakeTimers();
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -97,15 +101,23 @@ describe("OnboardingFlow", () => {
     }
 
     await waitFor(() => {
+      expect(screen.getByTestId("building-persona")).toBeInTheDocument();
+    });
+
+    jest.advanceTimersByTime(3000);
+
+    await waitFor(() => {
       expect(screen.getByText(/The Grinder/)).toBeInTheDocument();
     });
 
     expect(screen.getByText("#chess")).toBeInTheDocument();
     expect(screen.getByText("#competitive")).toBeInTheDocument();
     expect(screen.getByText(/Let's Go/)).toBeInTheDocument();
+    jest.useRealTimers();
   });
 
-  it("calls onComplete when Let's Go is clicked", async () => {
+  it("transitions Chat → Building → Result → Dashboard in correct order", async () => {
+    jest.useFakeTimers();
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -117,6 +129,9 @@ describe("OnboardingFlow", () => {
 
     render(<OnboardingFlow onComplete={mockOnComplete} />);
 
+    // Phase 1: Chat — input visible
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
+
     for (let i = 0; i < 4; i++) {
       await waitFor(() => {
         expect(screen.getByRole("textbox")).not.toBeDisabled();
@@ -126,12 +141,26 @@ describe("OnboardingFlow", () => {
       fireEvent.click(screen.getByText("→"));
     }
 
+    // Phase 2: Building — animation screen visible, input gone
     await waitFor(() => {
-      expect(screen.getByText(/Let's Go/)).toBeInTheDocument();
+      expect(screen.getByTestId("building-persona")).toBeInTheDocument();
     });
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
 
+    // Advance past minimum building duration
+    jest.advanceTimersByTime(3000);
+
+    // Phase 3: Result — archetype + Let's Go button visible
+    await waitFor(() => {
+      expect(screen.getByTestId("result-screen")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/The Lurker/)).toBeInTheDocument();
+    expect(screen.getByText(/Let's Go/)).toBeInTheDocument();
+
+    // Phase 4: Dashboard — onComplete called
     fireEvent.click(screen.getByText(/Let's Go/));
     expect(mockOnComplete).toHaveBeenCalledTimes(1);
+    jest.useRealTimers();
   });
 
   it("does not submit when input is empty", () => {
