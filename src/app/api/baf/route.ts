@@ -16,8 +16,11 @@ export async function POST(request: Request) {
 
     if (action === "baf") {
       // Enforce daily press limit (free=3/day, premium=unlimited, credits=extra)
+      // Bypass in development to avoid blocking testing
+      const isDev = process.env.NODE_ENV === "development";
       const pressStatus = await checkPressLimit(userId);
-      if (!pressStatus.allowed) {
+
+      if (!pressStatus.allowed && !isDev) {
         return NextResponse.json({
           error: "daily_limit_reached",
           message: "You've used all your BAF presses for today!",
@@ -30,15 +33,17 @@ export async function POST(request: Request) {
       const rescue = await runBafBrain(userId);
 
       // Record the press (increments counter, deducts credit if needed)
-      recordPress(userId).catch((err) =>
-        console.error("[BAF][PressLimiter] Non-blocking error:", err)
-      );
+      if (!isDev) {
+        recordPress(userId).catch((err) =>
+          console.error("[BAF][PressLimiter] Non-blocking error:", err)
+        );
+      }
 
       return NextResponse.json({
         ...rescue,
         pressStatus: {
-          remaining: pressStatus.remaining > 0 ? pressStatus.remaining - 1 : 0,
-          isPremium: pressStatus.isPremium,
+          remaining: isDev ? Infinity : (pressStatus.remaining > 0 ? pressStatus.remaining - 1 : 0),
+          isPremium: isDev ? true : pressStatus.isPremium,
           credits: pressStatus.credits,
         },
       });
