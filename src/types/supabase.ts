@@ -12,21 +12,21 @@ export interface Database {
       profiles: {
         Row: {
           id: string;
-          username: string;
+          username: string | null;
           bio: string | null;
           archetype: string;
           persona_embedding: string | null;
         };
         Insert: {
           id?: string;
-          username: string;
+          username?: string | null;
           bio?: string | null;
           archetype?: string;
           persona_embedding?: string | null;
         };
         Update: {
           id?: string;
-          username?: string;
+          username?: string | null;
           bio?: string | null;
           archetype?: string;
           persona_embedding?: string | null;

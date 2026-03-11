@@ -18,11 +18,12 @@ describe("Supabase client", () => {
     );
   });
 
-  it("throws when NEXT_PUBLIC_SUPABASE_ANON_KEY is missing", () => {
+  it("throws when neither service role key nor anon key is set", () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";
     delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     expect(() => require("@/lib/supabase")).toThrow(
-      "NEXT_PUBLIC_SUPABASE_ANON_KEY is not set"
+      "SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY must be set"
     );
   });
 

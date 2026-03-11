@@ -6,9 +6,52 @@ BAF is an AI-powered anti-boredom app. The user presses the **BAF** button when 
 
 ## User Flow
 
-1. **Dynamic Onboarding**: Randomized 4-question chat interview → AI maps to archetype + interest tags
-2. **Main Screen**: User presses **BAF** → Brain reasons with archetype + mood + tools → personalized suggestion
-3. **Feedback Loop**: LFG (accept, opens link) or Nah (reject → Why? → persona updates → new suggestion)
+1. **Authentication**: User signs up/logs in via Google OAuth or Email/Password → Supabase Auth → session cookie
+2. **Routing**: New user (no archetype) → Onboarding | Returning user → Dashboard
+3. **Dynamic Onboarding**: Randomized 4-question chat interview → "Building Your Persona" animation → AI maps to archetype + interest tags
+4. **Main Screen**: User presses **BAF** → Brain reasons with archetype + mood + tools → personalized suggestion
+5. **Feedback Loop**: LFG (accept, opens link) or Nah (reject → Why? → persona updates → new suggestion)
+
+## Authentication Architecture
+
+### Stack
+- **@supabase/ssr** — cookie-based session management for Next.js App Router
+- **Supabase Auth** — handles Google OAuth + Email/Password sign-up/login
+- **Next.js Middleware** — session refresh + route protection
+
+### Auth Flow
+```
+/login → [Google OAuth | Email+Password] → Supabase Auth → session cookie
+  ↓
+Middleware validates session on every request
+  ↓
+Protected routes (/) → getAuthUserId() extracts user ID from cookie
+  ↓
+New user (no archetype) → Onboarding → Dashboard
+Returning user → Dashboard directly
+```
+
+### Key Files
+- `src/lib/supabase/client.ts` — browser-side Supabase client (anon key, for auth operations)
+- `src/lib/supabase/server.ts` — server-side Supabase client (cookie-based session)
+- `src/lib/supabase/api.ts` — `getAuthUserId()` helper for API routes
+- `src/lib/supabase.ts` — server singleton (service role key, bypasses RLS for trusted operations)
+- `src/middleware.ts` — session refresh, redirects unauthenticated → `/login`, authenticated away from `/login`
+- `src/app/login/page.tsx` — login/signup UI with Google OAuth + Email/Password
+- `src/app/login/actions.ts` — server actions: `login`, `signup`, `signInWithGoogle`, `logout`
+- `src/app/auth/callback/route.ts` — OAuth callback handler
+
+### Security
+- **RLS enabled** on `profiles`, `persona_stats`, `interests`, `baf_history`
+- **Policies**: users can only read/write their own data via `auth.uid() = user_id`
+- **Service role key**: server singleton bypasses RLS for trusted server-side operations
+- **`suggestion_pool`**: shared content, no RLS (all users read from the same pool)
+- **SQL trigger**: `handle_new_user()` auto-creates a `profiles` row on auth signup
+
+### Environment Variables
+- `NEXT_PUBLIC_SUPABASE_URL` — Supabase project URL
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` — public anon key (browser client + middleware)
+- `SUPABASE_SERVICE_ROLE_KEY` — service role key (server singleton, bypasses RLS)
 
 ## Boredom Archetypes
 
@@ -393,4 +436,5 @@ Pool entries are scored: base 35 × similarity + engagement bonus + archetype bo
 - **Embeddings**: OpenAI text-embedding-3-small (1536 dimensions)
 - **Real-Time Tools**: YouTube Data API v3 + Twitch Helix API + TikTok Deep Links + Chess.com PubAPI
 - **Validation**: Zod schemas on all tool outputs
-- **Testing**: Jest + React Testing Library (135 tests across 11 suites)
+- **Auth**: Supabase Auth + @supabase/ssr (Google OAuth + Email/Password)
+- **Testing**: Jest + React Testing Library (144 tests across 12 suites)

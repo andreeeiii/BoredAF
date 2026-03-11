@@ -305,7 +305,7 @@ async function reasoningNode(
 
 A "Nah" is NOT a request for a "better" version of the same thing — it means the user is BORED OF THAT ENTIRE SUBJECT. Pivot 180 degrees. If you suggested a game, suggest a video. If you suggested a video, suggest a physical activity or social content.
 
-Generate a UNIQUE suggestion for user "${state.userPersona.profile.username}". Request ID: ${uniqueId}
+Generate a UNIQUE suggestion for user "${state.userPersona.profile.username ?? "anonymous"}". Request ID: ${uniqueId}
 
 USER IDENTITY:
 - Archetype: "${archetype}" — Strategy: ${strategy}

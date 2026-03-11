@@ -5,14 +5,17 @@ import {
   isOnboardingComplete,
   type OnboardingAnswer,
 } from "@/lib/onboarding";
-
-const DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000000";
+import { getAuthUserId } from "@/lib/supabase/api";
 
 export async function POST(request: Request) {
   try {
+    const userId = await getAuthUserId();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await request.json();
     const action = body.action as string;
-    const userId = (body.userId as string) ?? DEFAULT_USER_ID;
 
     if (action === "check") {
       const complete = await isOnboardingComplete(userId);

@@ -4,7 +4,7 @@ import { nudgePersonaVector, updatePoolEngagement, expandPoolFromAccept, expandP
 export interface Persona {
   profile: {
     id: string;
-    username: string;
+    username: string | null;
     bio: string | null;
     archetype: string;
     persona_embedding: number[] | null;
