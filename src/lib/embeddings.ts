@@ -1,5 +1,7 @@
 import OpenAI from "openai";
 import { supabase } from "./supabase";
+import { validateYouTubeChannels, extractYouTubeHandle } from "./tools/registry";
+import { fetchTwitchUsers } from "./tools/socialTools";
 
 const EMBEDDING_MODEL = "text-embedding-3-small";
 const EMBEDDING_DIMENSIONS = 1536;
@@ -332,9 +334,13 @@ Return ONLY a JSON array: [{"text": "CreatorName — what they do (under 60 char
       })
       .slice(0, 15);
 
+    // Validate against real platform APIs (YouTube subs, Twitch broadcaster_type)
+    const validated = await validatePoolEntries(valid, "OnboardingSeed");
+    console.log(`[BAF][OnboardingSeed] ${valid.length} passed LLM filter → ${validated.length} passed API validation`);
+
     let inserted = 0;
 
-    for (const s of valid) {
+    for (const s of validated) {
       const { data: existing } = await supabase
         .from("suggestion_pool")
         .select("id")
@@ -367,6 +373,83 @@ export interface PoolExpansionSuggestion {
   url: string;
   category: string;
   followers_approx?: number;
+}
+
+const MIN_YOUTUBE_SUBS = 50_000;
+
+/**
+ * Validate pool entries against real platform APIs before insertion.
+ * - YouTube: checks real subscriber count via Data API v3
+ * - Twitch: checks broadcaster_type (must be partner or affiliate)
+ * Filters out entries that fail validation. General entries pass through.
+ */
+async function validatePoolEntries(
+  entries: PoolExpansionSuggestion[],
+  logPrefix: string
+): Promise<PoolExpansionSuggestion[]> {
+  // Collect YouTube handles and Twitch usernames for batch validation
+  const ytHandles: { handle: string; index: number }[] = [];
+  const twitchUsernames: { username: string; index: number }[] = [];
+
+  entries.forEach((s, i) => {
+    if (s.platform === "youtube" && s.url) {
+      const handle = extractYouTubeHandle(s.url);
+      if (handle) ytHandles.push({ handle, index: i });
+    }
+    if (s.platform === "twitch" && s.url) {
+      const match = s.url.match(/twitch\.tv\/([^/?]+)/);
+      if (match) twitchUsernames.push({ username: match[1], index: i });
+    }
+  });
+
+  // Run YouTube + Twitch validation in parallel
+  const [ytStats, twitchResult] = await Promise.all([
+    ytHandles.length > 0
+      ? validateYouTubeChannels(ytHandles.map((h) => h.handle))
+      : Promise.resolve(new Map()),
+    twitchUsernames.length > 0
+      ? fetchTwitchUsers(twitchUsernames.map((t) => t.username))
+      : Promise.resolve({ users: [], error: null }),
+  ]);
+
+  // Build sets of valid entries
+  const blockedIndices = new Set<number>();
+
+  // Check YouTube channels
+  for (const { handle, index } of ytHandles) {
+    const stats = ytStats.get(handle.toLowerCase());
+    if (!stats || !stats.exists) {
+      console.log(`[BAF][${logPrefix}] YouTube channel "@${handle}" not found — filtered`);
+      blockedIndices.add(index);
+    } else if (stats.subscriberCount < MIN_YOUTUBE_SUBS) {
+      console.log(`[BAF][${logPrefix}] YouTube "@${handle}" has ${stats.subscriberCount.toLocaleString()} subs (need ${MIN_YOUTUBE_SUBS.toLocaleString()}) — filtered`);
+      blockedIndices.add(index);
+    } else {
+      console.log(`[BAF][${logPrefix}] YouTube "@${handle}" verified: ${stats.subscriberCount.toLocaleString()} subs ✓`);
+    }
+  }
+
+  // Check Twitch users
+  const validTwitchLogins = new Set(
+    twitchResult.users
+      .filter((u) => u.broadcasterType === "partner" || u.broadcasterType === "affiliate")
+      .map((u) => u.login)
+  );
+
+  for (const { username, index } of twitchUsernames) {
+    const found = twitchResult.users.some((u) => u.login === username.toLowerCase());
+    if (!found) {
+      console.log(`[BAF][${logPrefix}] Twitch "${username}" not found — filtered`);
+      blockedIndices.add(index);
+    } else if (!validTwitchLogins.has(username.toLowerCase())) {
+      console.log(`[BAF][${logPrefix}] Twitch "${username}" is not affiliate/partner — filtered`);
+      blockedIndices.add(index);
+    } else {
+      console.log(`[BAF][${logPrefix}] Twitch "${username}" verified ✓`);
+    }
+  }
+
+  return entries.filter((_, i) => !blockedIndices.has(i));
 }
 
 export async function generateSimilarSuggestions(
@@ -449,7 +532,11 @@ export async function expandPoolFromAccept(
   platform: string,
   category: string
 ): Promise<number> {
-  const suggestions = await generateSimilarSuggestions(acceptedText, platform, category);
+  const raw = await generateSimilarSuggestions(acceptedText, platform, category);
+  if (raw.length === 0) return 0;
+
+  // Validate against real platform APIs before insertion
+  const suggestions = await validatePoolEntries(raw, "PoolExpansion");
   if (suggestions.length === 0) return 0;
 
   let inserted = 0;
@@ -542,9 +629,13 @@ Return JSON array: [{"text": "CreatorName — description under 60 chars", "plat
         return true;
       })
       .slice(0, 3);
+
+    // Validate against real platform APIs before insertion
+    const validated = await validatePoolEntries(valid, "RejectExpansion");
+
     let inserted = 0;
 
-    for (const s of valid) {
+    for (const s of validated) {
       const { data: existing } = await supabase
         .from("suggestion_pool")
         .select("id")

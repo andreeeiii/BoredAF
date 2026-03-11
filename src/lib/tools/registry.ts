@@ -108,6 +108,79 @@ export async function fetchYouTubeVideos(
   }
 }
 
+export interface YouTubeChannelStats {
+  handle: string;
+  subscriberCount: number;
+  exists: boolean;
+}
+
+/**
+ * Validate YouTube channels by checking real subscriber counts.
+ * Uses the channels.list endpoint with forHandle parameter (1 unit per call).
+ * Returns a map of handle → { subscriberCount, exists }.
+ */
+export async function validateYouTubeChannels(
+  handles: string[]
+): Promise<Map<string, YouTubeChannelStats>> {
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  const results = new Map<string, YouTubeChannelStats>();
+
+  if (!apiKey || handles.length === 0) {
+    return results;
+  }
+
+  const fetches = handles.slice(0, 20).map(async (handle) => {
+    const cleanHandle = handle.startsWith("@") ? handle : `@${handle}`;
+    try {
+      const params = new URLSearchParams({
+        key: apiKey,
+        forHandle: cleanHandle,
+        part: "statistics",
+      });
+
+      const res = await fetch(
+        `https://www.googleapis.com/youtube/v3/channels?${params}`,
+        { next: { revalidate: 3600 } }
+      );
+
+      if (!res.ok) {
+        results.set(handle.toLowerCase(), { handle, subscriberCount: 0, exists: false });
+        return;
+      }
+
+      const data = await res.json();
+      const channel = (data.items ?? [])[0];
+
+      if (!channel) {
+        results.set(handle.toLowerCase(), { handle, subscriberCount: 0, exists: false });
+        return;
+      }
+
+      const subs = parseInt(channel.statistics?.subscriberCount ?? "0", 10);
+      results.set(handle.toLowerCase(), { handle, subscriberCount: subs, exists: true });
+    } catch {
+      results.set(handle.toLowerCase(), { handle, subscriberCount: 0, exists: false });
+    }
+  });
+
+  await Promise.all(fetches);
+  return results;
+}
+
+/**
+ * Extract YouTube handle from a URL.
+ * Supports: youtube.com/@Handle, youtube.com/c/Handle, youtube.com/channel/UCxxx
+ */
+export function extractYouTubeHandle(url: string): string | null {
+  const handleMatch = url.match(/youtube\.com\/@([^/?]+)/);
+  if (handleMatch) return handleMatch[1];
+
+  const customMatch = url.match(/youtube\.com\/c\/([^/?]+)/);
+  if (customMatch) return customMatch[1];
+
+  return null;
+}
+
 export async function fetchChessData(
   username?: string
 ): Promise<ChessResult> {
