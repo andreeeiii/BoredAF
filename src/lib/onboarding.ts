@@ -1,4 +1,4 @@
-import { ChatAnthropic } from "@langchain/anthropic";
+import OpenAI from "openai";
 import { z } from "zod";
 import { supabase } from "./supabase";
 import { mapToArchetype } from "./mood";
@@ -31,18 +31,13 @@ export interface OnboardingAnswer {
 export async function parsePersona(
   answers: OnboardingAnswer[]
 ): Promise<PersonaMapping> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
     return buildFallbackPersona(answers);
   }
 
-  const llm = new ChatAnthropic({
-    model: "claude-sonnet-4-20250514",
-    temperature: 0.3,
-    maxTokens: 500,
-    apiKey,
-  });
+  const openai = new OpenAI({ apiKey });
 
   const formattedAnswers = answers
     .map((a) => `[${a.slot.toUpperCase()}] Q: "${a.question}" A: "${a.answer}"`)
@@ -68,11 +63,19 @@ Respond in EXACTLY this JSON format, nothing else:
 {"archetype": "The Grind|The Chill|The Spark", "tags": ["tag1", "tag2"], "personaData": {"energy": "high|low|mixed", "focus": "logic|visual|physical|creative|social"}, "extractedInterests": [{"platform": "youtube|twitch|reddit|game|other", "ref_id": "handle_or_name", "weight": 8}]}`;
 
   try {
-    const response = await llm.invoke(prompt);
-    const content =
-      typeof response.content === "string"
-        ? response.content
-        : JSON.stringify(response.content);
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0.3,
+      max_tokens: 500,
+      messages: [
+        {
+          role: "system",
+          content: "You analyze user onboarding answers and extract persona data. Respond with ONLY valid JSON, no markdown, no explanation.",
+        },
+        { role: "user", content: prompt },
+      ],
+    });
+    const content = response.choices[0]?.message?.content ?? "";
 
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON in LLM response");

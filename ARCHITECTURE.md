@@ -317,19 +317,18 @@ Pool entries are scored: base 35 × similarity + engagement bonus + archetype bo
 
 | Model | Purpose | Pricing (per 1M tokens) |
 |-------|---------|------------------------|
-| **Claude Sonnet 4** | Reasoning (per BAF click) + Onboarding persona parsing | $3 input / $15 output |
-| **GPT-4o-mini** | Pool seeding + Pool expansion (accept/reject) | $0.15 input / $0.60 output |
+| **GPT-4o-mini** | Reasoning (per BAF click) + Onboarding persona parsing + Pool seeding + Pool expansion | $0.15 input / $0.60 output |
 | **text-embedding-3-small** | All vector embeddings (persona, pool entries, nudges) | $0.02 |
 
 ### Cost per Onboarding (one-time per user)
 
 | Step | Model | Input Tokens | Output Tokens | Cost |
 |------|-------|-------------|---------------|------|
-| parsePersona | Claude Sonnet 4 | ~400 | ~100 | $0.0027 |
+| parsePersona | GPT-4o-mini | ~400 | ~100 | $0.00012 |
 | generatePersonaEmbedding | text-embedding-3-small | ~100 | — | $0.000002 |
 | seedPoolFromOnboarding | GPT-4o-mini | ~500 | ~1500 | $0.000975 |
 | 15× embedSuggestionPoolEntry | text-embedding-3-small | ~900 | — | $0.000018 |
-| **Total per Onboarding** | | | | **~$0.0037** |
+| **Total per Onboarding** | | | | **~$0.0011** |
 
 ### Cost per BAF Click
 
@@ -338,9 +337,9 @@ Pool entries are scored: base 35 × similarity + engagement bonus + archetype bo
 | contextNode | Supabase (free) | — | — | $0.00 |
 | poolFetchNode | Supabase pgvector + Twitch API (free) | — | — | $0.00 |
 | rankingNode | Pure computation | — | — | $0.00 |
-| **reasoningNode** | **Claude Sonnet 4** | **~800** | **~100** | **$0.0039** |
+| **reasoningNode** | **GPT-4o-mini** | **~800** | **~100** | **$0.00018** |
 | validationNode | Pure computation | — | — | $0.00 |
-| **Subtotal (Brain)** | | | | **$0.0039** |
+| **Subtotal (Brain)** | | | | **$0.00018** |
 
 #### Post-Click Feedback (async, on every accept/reject)
 
@@ -354,46 +353,43 @@ Pool entries are scored: base 35 × similarity + engagement bonus + archetype bo
 
 | | |
 |---|---|
-| **Total per BAF click** | **~$0.0042** |
+| **Total per BAF click** | **~$0.00047** |
 
 ### Monthly Burn Estimate (1,000 users × 3 clicks/day)
 
 | Item | Calculation | Cost |
 |------|------------|------|
-| Onboarding (one-time) | 1,000 × $0.0037 | $3.70 |
-| BAF clicks | 1,000 × 3 × 30 × $0.0042 | $378.00 |
-| **Total monthly (1K users)** | | **~$382** |
-| **Per user per month** | | **~$0.38** |
+| Onboarding (one-time) | 1,000 × $0.0011 | $1.10 |
+| BAF clicks | 1,000 × 3 × 30 × $0.00047 | $42.30 |
+| **Total monthly (1K users)** | | **~$43** |
+| **Per user per month** | | **~$0.043** |
 
-### Cost Optimization Recommendations
+### Cost Optimization Applied
 
-1. **Replace Claude Sonnet → GPT-4o-mini for reasoning** (HIGHEST IMPACT)
-   - Current: $0.0039/click → Would be: ~$0.0003/click (13× cheaper)
-   - Monthly 1K users: $378 → ~$27
-   - Trade-off: Slightly less creative suggestions, but GPT-4o-mini handles structured JSON well
+✅ **Claude Sonnet → GPT-4o-mini** (DONE — 9× cheaper overall)
+- Reasoning: $0.0039/click → $0.00018/click
+- Onboarding: $0.0027 → $0.00012
+- Monthly 1K users: $382 → ~$43
 
-2. **Replace Claude Sonnet → Claude Haiku for reasoning**
-   - Current: $0.0039/click → Would be: ~$0.00033/click (12× cheaper)
-   - Keeps Anthropic ecosystem, very fast responses
+### Further Optimization Opportunities
 
-3. **Cache persona context** — avoid re-fetching identical persona data on rapid clicks within the same session
+1. **Cache persona context** — avoid re-fetching identical persona data on rapid clicks within the same session
+2. **Batch embeddings** — combine multiple texts into one OpenAI embeddings API call (saves HTTP overhead)
+3. **Skip expansion on rapid rejects** — if user rejects 3+ times in 10 seconds, batch the expansion calls
+4. **Response caching** — cache LLM reasoning for identical ranked content sets (short TTL)
 
-4. **Batch embeddings** — combine multiple texts into one OpenAI embeddings API call (saves HTTP overhead, same token cost)
+### Current Cost Breakdown
+- **38% — GPT-4o-mini reasoning** ($0.00018/click)
+- **61% — GPT-4o-mini pool expansion** ($0.000285/click)
+- **1% — OpenAI embeddings** ($0.000005/click)
 
-5. **Skip expansion on rapid rejects** — if user rejects 3+ times in 10 seconds, batch the expansion calls instead of firing 3 separate ones
-
-### Current Cost Breakdown (pie chart approximation)
-- **93% — Claude Sonnet 4 reasoning** ($0.0039/click)
-- **5% — GPT-4o-mini pool expansion** ($0.000285/click)
-- **2% — OpenAI embeddings** ($0.000005/click)
-
-> **Bottom line**: Claude Sonnet reasoning is 93% of the cost. Switching to GPT-4o-mini or Claude Haiku would reduce the monthly burn from ~$382 to ~$30 for 1,000 users.
+> **Bottom line**: All LLM calls now use GPT-4o-mini. Monthly burn dropped from ~$382 to ~$43 for 1,000 users (9× reduction). No Anthropic API key required.
 
 ## Tech Stack
 
 - **Frontend**: Next.js 14 + Tailwind CSS + Framer Motion + TypeScript
 - **Database**: Supabase Cloud (PostgreSQL + JSONB + **pgvector**)
-- **AI Brain**: LangGraph + Claude 3.5 Sonnet (Anthropic)
+- **AI Brain**: LangGraph + GPT-4o-mini (OpenAI)
 - **Embeddings**: OpenAI text-embedding-3-small (1536 dimensions)
 - **Real-Time Tools**: YouTube Data API v3 + Twitch Helix API + TikTok Deep Links + Chess.com PubAPI
 - **Validation**: Zod schemas on all tool outputs

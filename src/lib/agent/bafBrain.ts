@@ -1,4 +1,4 @@
-import { ChatAnthropic } from "@langchain/anthropic";
+import OpenAI from "openai";
 import { StateGraph, Annotation, END } from "@langchain/langgraph";
 import { z } from "zod";
 import { getPersona, type Persona } from "../persona";
@@ -227,13 +227,13 @@ async function reasoningNode(
     };
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     const topItem = (state.rankedContent ?? [])[0];
     if (topItem) {
       const base: Rescue = {
         suggestion: `Check out: ${topItem.title.slice(0, 60)}`,
-        emoji: topItem.isLive ? "🔴" : "🎯",
+        emoji: topItem.isLive ? "\uD83D\uDD34" : "\uD83C\uDFAF",
         vibe: topItem.isLive ? "live" : "discover",
         source: topItem.platform as Rescue["source"],
         link: topItem.url,
@@ -249,7 +249,7 @@ async function reasoningNode(
     return {
       finalRescue: {
         suggestion: getDefaultRescue(previousSuggestions),
-        emoji: "🎲",
+        emoji: "\uD83C\uDFB2",
         vibe: "random",
         source: "fallback",
         link: null,
@@ -263,12 +263,7 @@ async function reasoningNode(
   const archetype = mood.effectiveArchetype;
   const strategy = getArchetypeStrategy(archetype);
 
-  const llm = new ChatAnthropic({
-    model: "claude-sonnet-4-20250514",
-    temperature: 0.97,
-    maxTokens: 500,
-    apiKey,
-  });
+  const openai = new OpenAI({ apiKey });
 
   const rejections = state.userPersona.recentHistory
     .filter((h) => h.outcome === "rejected")
@@ -347,11 +342,19 @@ Respond in EXACTLY this JSON format:
 {"suggestion": "unique witty text max 15 words", "emoji": "one emoji", "vibe": "one word", "source": "youtube|chess|twitch|tiktok|general|semantic|custom", "link": "real_url_from_list_above_or_null_for_semantic", "isLive": false}`;
 
   try {
-    const response = await llm.invoke(prompt);
-    const content =
-      typeof response.content === "string"
-        ? response.content
-        : JSON.stringify(response.content);
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0.95,
+      max_tokens: 500,
+      messages: [
+        {
+          role: "system",
+          content: "You are an adaptive life-coach and content curator for the BAF (BoredAF) app. You MUST respond with ONLY valid JSON, no markdown, no explanation.",
+        },
+        { role: "user", content: prompt },
+      ],
+    });
+    const content = response.choices[0]?.message?.content ?? "";
 
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON in response");
