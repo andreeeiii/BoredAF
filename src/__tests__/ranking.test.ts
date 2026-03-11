@@ -320,3 +320,29 @@ describe("Pool Engagement & Live Enrichment", () => {
     expect(items[0].metadata.poolId).toBe("my-pool-id-123");
   });
 });
+
+describe("Sponsored Content", () => {
+  it("gives +30 score boost to sponsored entries", () => {
+    const sponsored = { ...makePoolEntry({ id: "sp1", similarity: 0.8, platform: "youtube" }), is_sponsored: true, sponsor_id: "brand-1" } as SemanticMatch;
+    const organic = makePoolEntry({ id: "org1", similarity: 0.8, platform: "youtube" });
+    const items = rankContent([sponsored, organic], [], "The Spark", [], []);
+    const sp = items.find((i) => i.metadata.isSponsored);
+    const org = items.find((i) => !i.metadata.isSponsored);
+    expect(sp).toBeDefined();
+    expect(org).toBeDefined();
+    expect(sp!.score - org!.score).toBe(30);
+  });
+
+  it("passes sponsorId through metadata", () => {
+    const sponsored = { ...makePoolEntry({ id: "sp2", similarity: 0.8 }), is_sponsored: true, sponsor_id: "brand-xyz" } as SemanticMatch;
+    const items = rankContent([sponsored], [], "The Spark", [], []);
+    expect(items[0].metadata.isSponsored).toBe(true);
+    expect(items[0].metadata.sponsorId).toBe("brand-xyz");
+  });
+
+  it("marks non-sponsored entries as isSponsored=false", () => {
+    const pool = [makePoolEntry({ id: "org1", similarity: 0.8 })];
+    const items = rankContent(pool, [], "The Spark", [], []);
+    expect(items[0].metadata.isSponsored).toBe(false);
+  });
+});

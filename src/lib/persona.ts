@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { nudgePersonaVector, updatePoolEngagement, expandPoolFromAccept, expandPoolFromReject, deactivateUnderperformingEntries } from "./embeddings";
+import { nudgePersonaVector, updatePoolEngagement, expandPoolFromAccept, deactivateUnderperformingEntries } from "./embeddings";
 
 export interface Persona {
   profile: {
@@ -181,17 +181,8 @@ export async function updatePersona(
 
     console.log(`[BAF] Blacklisted "${rejectedText.slice(0, 40)}..." for 30 minutes`);
 
-    // Generate new alternatives based on rejection reason (fire-and-forget)
-    if (feedback.source && feedback.source !== "fallback") {
-      expandPoolFromReject(
-        feedback.suggestion,
-        feedback.source,
-        feedback.category ?? "general",
-        feedback.reason ?? "other"
-      ).catch((err) =>
-        console.error("[BAF][RejectExpansion] Non-blocking error:", err)
-      );
-    }
+    // Reject-expansion removed: vector nudge + circuit breaker handle personalization.
+    // Pool expansion only happens on accept (rate-limited) to cut costs ~61%.
 
     if (feedback.reason === "too tired") {
       await supabase

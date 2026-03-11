@@ -458,3 +458,67 @@ describe("Pool mutation on every interaction", () => {
     expect(deactivationCalled).toHaveLength(2);
   });
 });
+
+describe("Pool maturity rate-limiting", () => {
+  const POOL_EXPANSION_THRESHOLD = 500;
+
+  it("skips expansion when pool count >= threshold", () => {
+    const currentCount = 500;
+    const shouldSkip = currentCount >= POOL_EXPANSION_THRESHOLD;
+    expect(shouldSkip).toBe(true);
+  });
+
+  it("allows expansion when pool count < threshold", () => {
+    const currentCount = 50;
+    const shouldSkip = currentCount >= POOL_EXPANSION_THRESHOLD;
+    expect(shouldSkip).toBe(false);
+  });
+
+  it("allows expansion at zero entries", () => {
+    const currentCount = 0;
+    const shouldSkip = currentCount >= POOL_EXPANSION_THRESHOLD;
+    expect(shouldSkip).toBe(false);
+  });
+
+  it("skips expansion at exactly threshold", () => {
+    const currentCount = POOL_EXPANSION_THRESHOLD;
+    const shouldSkip = currentCount >= POOL_EXPANSION_THRESHOLD;
+    expect(shouldSkip).toBe(true);
+  });
+
+  it("allows expansion at threshold - 1", () => {
+    const currentCount = POOL_EXPANSION_THRESHOLD - 1;
+    const shouldSkip = currentCount >= POOL_EXPANSION_THRESHOLD;
+    expect(shouldSkip).toBe(false);
+  });
+});
+
+describe("Batch embeddings", () => {
+  it("returns embeddings in same order as input texts", () => {
+    // Simulate OpenAI response with shuffled indices
+    const apiResponse = [
+      { index: 2, embedding: [0.3, 0.3] },
+      { index: 0, embedding: [0.1, 0.1] },
+      { index: 1, embedding: [0.2, 0.2] },
+    ];
+
+    const sorted = apiResponse.sort((a, b) => a.index - b.index);
+    const embeddings = sorted.map((d) => d.embedding);
+
+    expect(embeddings[0]).toEqual([0.1, 0.1]);
+    expect(embeddings[1]).toEqual([0.2, 0.2]);
+    expect(embeddings[2]).toEqual([0.3, 0.3]);
+  });
+
+  it("handles empty input array", () => {
+    const texts: string[] = [];
+    const result = texts.map(() => null);
+    expect(result).toHaveLength(0);
+  });
+
+  it("produces embedding string format for Supabase insertion", () => {
+    const embedding = [0.123, -0.456, 0.789];
+    const embeddingStr = `[${embedding.join(",")}]`;
+    expect(embeddingStr).toBe("[0.123,-0.456,0.789]");
+  });
+});

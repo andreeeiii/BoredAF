@@ -407,26 +407,59 @@ Pool entries are scored: base 35 × similarity + engagement bonus + archetype bo
 | **Total monthly (1K users)** | | **~$43** |
 | **Per user per month** | | **~$0.043** |
 
-### Cost Optimization Applied
+### Cost Optimizations Applied
 
 ✅ **Claude Sonnet → GPT-4o-mini** (DONE — 9× cheaper overall)
-- Reasoning: $0.0039/click → $0.00018/click
-- Onboarding: $0.0027 → $0.00012
-- Monthly 1K users: $382 → ~$43
+✅ **Rate-limited pool expansion** — only expands when pool has < 500 entries per platform/category combo
+✅ **Reject-expansion removed** — vector nudge + circuit breaker handle personalization; no LLM call on reject
+✅ **Reasoning cache** — 30-second TTL prevents duplicate LLM calls on rapid-fire clicks
+✅ **Batch embeddings** — multiple texts embedded in a single OpenAI API call
 
-### Further Optimization Opportunities
+### Optimized Cost Breakdown
+- **Brain reasoning (GPT-4o-mini)**: $0.00018/click — dominant cost, cached for rapid clicks
+- **Pool expansion**: near-zero at mature pool (rate-limited, no reject expansion)
+- **Embeddings**: $0.000005/click — batched
+- **Supabase / Twitch / YouTube**: $0 (free tiers)
 
-1. **Cache persona context** — avoid re-fetching identical persona data on rapid clicks within the same session
-2. **Batch embeddings** — combine multiple texts into one OpenAI embeddings API call (saves HTTP overhead)
-3. **Skip expansion on rapid rejects** — if user rejects 3+ times in 10 seconds, batch the expansion calls
-4. **Response caching** — cache LLM reasoning for identical ranked content sets (short TTL)
+### Optimized Monthly Burn (100K users × 3 clicks/day)
 
-### Current Cost Breakdown
-- **38% — GPT-4o-mini reasoning** ($0.00018/click)
-- **61% — GPT-4o-mini pool expansion** ($0.000285/click)
-- **1% — OpenAI embeddings** ($0.000005/click)
+| Item | Calculation | Cost |
+|------|------------|------|
+| Onboarding (one-time, amortized) | 100K × $0.0011 / 12 | ~$9 |
+| BAF clicks (with cache) | 100K × 3 × 30 × $0.00009 (50% cache hit) | ~$810 |
+| Pool expansion (rate-limited) | ~100 LLM calls/day × 30 | ~$100 |
+| Supabase Pro | — | $25 |
+| Vercel Pro | — | $20 |
+| **Total monthly (100K users)** | | **~$964** |
+| **Per user per month** | | **~$0.0096** |
 
-> **Bottom line**: All LLM calls now use GPT-4o-mini. Monthly burn dropped from ~$382 to ~$43 for 1,000 users (9× reduction). No Anthropic API key required.
+## Monetization Model
+
+### Revenue Stream A: Freemium + Credits
+
+| Tier | BAF Presses/Day | Price |
+|------|-----------------|-------|
+| **Free** | 3 per day | $0 |
+| **BAF+** (subscription) | Unlimited | $2.99/mo |
+| **Credit Packs** | +10 presses | $0.99 one-time |
+
+### Revenue Stream B: Partner Program (Sponsored Recommendations)
+
+Sponsored suggestions look like organic recommendations but are labeled "Sponsored."
+- `suggestion_pool.is_sponsored` flag + `sponsor_id` + `sponsor_cpm`
+- Sponsored entries get +30 score boost in ranking, capped at 1 per 5 suggestions
+- Tracked via `sponsor_events` table (impressions + clicks)
+- Charged CPM ($5-15) or CPC ($0.30-0.80)
+
+### Press Limiting Architecture
+
+- `persona_stats` category `"daily_presses"` stores `{ count, date, is_premium, credits }`
+- Free tier: 3 presses/day (auto-refills at midnight UTC)
+- BAF+ subscribers: unlimited (`is_premium: true` bypasses limit)
+- Credits: each press costs 1 credit if daily limit exceeded
+- Check happens in `/api/baf` route before calling `runBafBrain()`
+
+> **Bottom line**: At 100K MAU with 10% conversion to BAF+, revenue is ~$49,850/mo vs. ~$964/mo infra cost = **98% gross margin**. Breakeven at ~2,300 MAU.
 
 ## Tech Stack
 

@@ -242,6 +242,56 @@ function enrichWithTwitchMeta(
   };
 }
 
+// --- Reasoning Cache (30s TTL) ---
+// Prevents duplicate LLM calls on rapid-fire BAF button clicks.
+// Key = archetype + mood + top-5 ranked content IDs + rejections hash
+// Value = the LLM response JSON string
+interface CacheEntry {
+  response: string;
+  timestamp: number;
+}
+
+const reasoningCache = new Map<string, CacheEntry>();
+const REASONING_CACHE_TTL_MS = 30_000;
+
+function buildCacheKey(state: BafStateType): string {
+  const archetype = state.mood?.effectiveArchetype ?? "unknown";
+  const energy = state.mood?.energyLevel ?? "unknown";
+  const streak = state.mood?.recentRejectionStreak ?? 0;
+  const topIds = (state.rankedContent ?? [])
+    .slice(0, 5)
+    .map((r) => r.url)
+    .join("|");
+  const rejectHash = (state.previousSuggestions ?? []).slice(0, 5).join("|");
+  return `${archetype}:${energy}:${streak}:${topIds}:${rejectHash}`;
+}
+
+function getCachedReasoning(key: string): string | null {
+  const entry = reasoningCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > REASONING_CACHE_TTL_MS) {
+    reasoningCache.delete(key);
+    return null;
+  }
+  console.log(`[BAF][ReasoningCache] HIT — reusing cached reasoning (age: ${Math.round((Date.now() - entry.timestamp) / 1000)}s)`);
+  return entry.response;
+}
+
+function setCachedReasoning(key: string, response: string): void {
+  reasoningCache.set(key, { response, timestamp: Date.now() });
+  // Evict old entries to prevent memory leak
+  if (reasoningCache.size > 1000) {
+    const now = Date.now();
+    const keysToDelete: string[] = [];
+    reasoningCache.forEach((v, k) => {
+      if (now - v.timestamp > REASONING_CACHE_TTL_MS) {
+        keysToDelete.push(k);
+      }
+    });
+    keysToDelete.forEach((k) => reasoningCache.delete(k));
+  }
+}
+
 async function reasoningNode(
   state: BafStateType
 ): Promise<Partial<BafStateType>> {
@@ -377,19 +427,31 @@ Respond in EXACTLY this JSON format:
 {"suggestion": "unique witty text max 15 words", "emoji": "one emoji", "vibe": "one word", "source": "youtube|chess|twitch|tiktok|general|semantic|custom", "link": "real_url_from_list_above_or_null_for_semantic", "isLive": false}`;
 
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      temperature: 0.95,
-      max_tokens: 500,
-      messages: [
-        {
-          role: "system",
-          content: "You are an adaptive life-coach and content curator for the BAF (BoredAF) app. You MUST respond with ONLY valid JSON, no markdown, no explanation.",
-        },
-        { role: "user", content: prompt },
-      ],
-    });
-    const content = response.choices[0]?.message?.content ?? "";
+    // Check reasoning cache first (prevents duplicate LLM calls on rapid clicks)
+    const cacheKey = buildCacheKey(state);
+    const cachedContent = getCachedReasoning(cacheKey);
+
+    let content: string;
+    if (cachedContent) {
+      content = cachedContent;
+    } else {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        temperature: 0.95,
+        max_tokens: 500,
+        messages: [
+          {
+            role: "system",
+            content: "You are an adaptive life-coach and content curator for the BAF (BoredAF) app. You MUST respond with ONLY valid JSON, no markdown, no explanation.",
+          },
+          { role: "user", content: prompt },
+        ],
+      });
+      content = response.choices[0]?.message?.content ?? "";
+      if (content) {
+        setCachedReasoning(cacheKey, content);
+      }
+    }
 
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON in response");

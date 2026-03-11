@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { runBafBrain } from "@/lib/agent/bafBrain";
 import { updatePersona, logNegativeSignal } from "@/lib/persona";
 import { getAuthUserId } from "@/lib/supabase/api";
+import { checkPressLimit, recordPress } from "@/lib/pressLimiter";
 
 export async function POST(request: Request) {
   try {
@@ -14,8 +15,33 @@ export async function POST(request: Request) {
     const action = body.action as string;
 
     if (action === "baf") {
+      // Enforce daily press limit (free=3/day, premium=unlimited, credits=extra)
+      const pressStatus = await checkPressLimit(userId);
+      if (!pressStatus.allowed) {
+        return NextResponse.json({
+          error: "daily_limit_reached",
+          message: "You've used all your BAF presses for today!",
+          remaining: 0,
+          isPremium: pressStatus.isPremium,
+          credits: pressStatus.credits,
+        }, { status: 429 });
+      }
+
       const rescue = await runBafBrain(userId);
-      return NextResponse.json(rescue);
+
+      // Record the press (increments counter, deducts credit if needed)
+      recordPress(userId).catch((err) =>
+        console.error("[BAF][PressLimiter] Non-blocking error:", err)
+      );
+
+      return NextResponse.json({
+        ...rescue,
+        pressStatus: {
+          remaining: pressStatus.remaining > 0 ? pressStatus.remaining - 1 : 0,
+          isPremium: pressStatus.isPremium,
+          credits: pressStatus.credits,
+        },
+      });
     }
 
     if (action === "feedback") {

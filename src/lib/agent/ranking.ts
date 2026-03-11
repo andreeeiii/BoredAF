@@ -44,6 +44,10 @@ export function rankContent(
       ? Math.round(10 * (entry.times_accepted / Math.max(entry.times_shown, 1)))
       : 0;
 
+    const entryAny = entry as unknown as Record<string, unknown>;
+    const isSponsored = !!entryAny.is_sponsored;
+    const sponsorBonus = isSponsored ? 30 : 0;
+
     let isLive = false;
     const twitchMatch = entry.platform === "twitch" && entry.url
       ? entry.url.match(/twitch\.tv\/([^/?]+)/)
@@ -59,12 +63,14 @@ export function rankContent(
       platform: entry.platform || "general",
       title: entry.content_text,
       url: entry.url || "",
-      score: baseScore + engagementBonus + (isLive ? 50 : 0),
+      score: baseScore + engagementBonus + sponsorBonus + (isLive ? 50 : 0),
       isLive,
       metadata: {
         category: entry.category,
         similarity: entry.similarity,
         poolId: entry.id,
+        isSponsored,
+        ...(isSponsored ? { sponsorId: entryAny.sponsor_id } : {}),
         ...(liveData ? {
           username: liveData.username,
           viewerCount: liveData.viewerCount,
@@ -73,6 +79,18 @@ export function rankContent(
         } : {}),
       },
     });
+  }
+
+  // Cap sponsored entries: max 1 sponsored in top 5
+  const sponsoredInTop5 = items.slice(0, 5).filter((i) => i.metadata.isSponsored);
+  if (sponsoredInTop5.length > 1) {
+    let skipped = 0;
+    for (const item of items) {
+      if (item.metadata.isSponsored && skipped > 0) {
+        item.score -= 200;
+      }
+      if (item.metadata.isSponsored) skipped++;
+    }
   }
 
   for (const item of items) {

@@ -37,6 +37,30 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
   }
 }
 
+/**
+ * Batch-embed multiple texts in a single OpenAI API call.
+ * Returns an array of embeddings in the same order as the input texts.
+ * Null entries indicate failures for individual texts.
+ */
+export async function generateEmbeddingsBatch(texts: string[]): Promise<(number[] | null)[]> {
+  const openai = getOpenAI();
+  if (!openai || texts.length === 0) return texts.map(() => null);
+
+  try {
+    const response = await openai.embeddings.create({
+      model: EMBEDDING_MODEL,
+      input: texts,
+      dimensions: EMBEDDING_DIMENSIONS,
+    });
+    // OpenAI returns embeddings sorted by index
+    const sorted = response.data.sort((a, b) => a.index - b.index);
+    return sorted.map((d) => d.embedding);
+  } catch (err) {
+    console.error("[BAF][Embedding] Batch embedding failed:", err instanceof Error ? err.message : err);
+    return texts.map(() => null);
+  }
+}
+
 export interface PersonaTextInput {
   archetype: string;
   tags: string[];
@@ -338,8 +362,8 @@ Return ONLY a JSON array: [{"text": "CreatorName — what they do (under 60 char
     const validated = await validatePoolEntries(valid, "OnboardingSeed");
     console.log(`[BAF][OnboardingSeed] ${valid.length} passed LLM filter → ${validated.length} passed API validation`);
 
-    let inserted = 0;
-
+    // Dedup against existing pool entries
+    const fresh: typeof validated = [];
     for (const s of validated) {
       const { data: existing } = await supabase
         .from("suggestion_pool")
@@ -351,11 +375,36 @@ Return ONLY a JSON array: [{"text": "CreatorName — what they do (under 60 char
         console.log(`[BAF][OnboardingSeed] Skipped duplicate: "${s.text.slice(0, 40)}..."`);
         continue;
       }
+      fresh.push(s);
+    }
 
-      const id = await embedSuggestionPoolEntry(s.text, s.category, s.platform, s.url || "");
-      if (id) {
+    if (fresh.length === 0) return 0;
+
+    // Batch-embed all entries in a single API call
+    const embeddings = await generateEmbeddingsBatch(fresh.map((s) => s.text));
+
+    let inserted = 0;
+    for (let i = 0; i < fresh.length; i++) {
+      const s = fresh[i];
+      const embedding = embeddings[i];
+      if (!embedding) continue;
+
+      const embeddingStr = `[${embedding.join(",")}]`;
+      const { data, error } = await supabase
+        .from("suggestion_pool")
+        .insert({
+          content_text: s.text,
+          category: s.category,
+          platform: s.platform,
+          url: s.url || "",
+          embedding: embeddingStr,
+        })
+        .select("id")
+        .single();
+
+      if (!error && data?.id) {
         inserted++;
-        console.log(`[BAF][OnboardingSeed] Added: "${s.text.slice(0, 40)}..." (${s.platform}) → ${id}`);
+        console.log(`[BAF][OnboardingSeed] Added: "${s.text.slice(0, 40)}..." (${s.platform}) → ${data.id}`);
       }
     }
 
@@ -527,11 +576,43 @@ Rules:
   }
 }
 
+const POOL_EXPANSION_THRESHOLD = 500;
+
+/**
+ * Check if the pool already has enough entries for a platform/category combo.
+ * Returns true if expansion should be skipped (pool is mature).
+ */
+async function isPoolMature(platform: string, category: string): Promise<boolean> {
+  const { count, error } = await supabase
+    .from("suggestion_pool")
+    .select("id", { count: "exact", head: true })
+    .eq("is_active", true)
+    .eq("platform", platform)
+    .eq("category", category);
+
+  if (error) {
+    console.error("[BAF][PoolCheck] Error checking pool density:", error.message);
+    return false;
+  }
+
+  const currentCount = count ?? 0;
+  if (currentCount >= POOL_EXPANSION_THRESHOLD) {
+    console.log(`[BAF][PoolCheck] Pool mature for ${platform}/${category} (${currentCount} entries) — skipping expansion`);
+    return true;
+  }
+
+  console.log(`[BAF][PoolCheck] Pool sparse for ${platform}/${category} (${currentCount}/${POOL_EXPANSION_THRESHOLD}) — expanding`);
+  return false;
+}
+
 export async function expandPoolFromAccept(
   acceptedText: string,
   platform: string,
   category: string
 ): Promise<number> {
+  // Rate-limit: skip expansion if pool is already mature for this combo
+  if (await isPoolMature(platform, category)) return 0;
+
   const raw = await generateSimilarSuggestions(acceptedText, platform, category);
   if (raw.length === 0) return 0;
 
@@ -539,8 +620,8 @@ export async function expandPoolFromAccept(
   const suggestions = await validatePoolEntries(raw, "PoolExpansion");
   if (suggestions.length === 0) return 0;
 
-  let inserted = 0;
-
+  // Dedup against existing pool entries
+  const fresh: typeof suggestions = [];
   for (const s of suggestions) {
     const { data: existing } = await supabase
       .from("suggestion_pool")
@@ -552,11 +633,36 @@ export async function expandPoolFromAccept(
       console.log(`[BAF][PoolExpansion] Skipped duplicate: "${s.text.slice(0, 40)}..."`);
       continue;
     }
+    fresh.push(s);
+  }
 
-    const id = await embedSuggestionPoolEntry(s.text, s.category, s.platform, s.url);
-    if (id) {
+  if (fresh.length === 0) return 0;
+
+  // Batch-embed all entries in a single API call
+  const embeddings = await generateEmbeddingsBatch(fresh.map((s) => s.text));
+
+  let inserted = 0;
+  for (let i = 0; i < fresh.length; i++) {
+    const s = fresh[i];
+    const embedding = embeddings[i];
+    if (!embedding) continue;
+
+    const embeddingStr = `[${embedding.join(",")}]`;
+    const { data, error } = await supabase
+      .from("suggestion_pool")
+      .insert({
+        content_text: s.text,
+        category: s.category,
+        platform: s.platform,
+        url: s.url,
+        embedding: embeddingStr,
+      })
+      .select("id")
+      .single();
+
+    if (!error && data?.id) {
       inserted++;
-      console.log(`[BAF][PoolExpansion] Added: "${s.text.slice(0, 40)}..." (${s.platform}) → ${id}`);
+      console.log(`[BAF][PoolExpansion] Added: "${s.text.slice(0, 40)}..." (${s.platform}) → ${data.id}`);
     }
   }
 
