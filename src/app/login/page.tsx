@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useSearchParams } from "next/navigation";
-import { login, signup, signInWithGoogle } from "./actions";
+import { login, signup } from "./actions";
+import { createClient } from "@/lib/supabase/client";
 
 type AuthMode = "login" | "signup";
 
@@ -11,20 +11,30 @@ export default function LoginPage() {
   const [mode, setMode] = useState<AuthMode>("login");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const searchParams = useSearchParams();
-  const error = searchParams.get("error");
-  const message = searchParams.get("message");
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
   const handleSubmit = async (formData: FormData) => {
     setLoading(true);
+    setError(null);
+    setMessage(null);
+
     try {
       if (mode === "login") {
-        await login(formData);
+        const result = await login(formData);
+        // If we get here (no redirect), there's an error or we need to show a message
+        if (result?.error) setError(result.error);
+        if (result?.message) setMessage(result.message);
       } else {
-        await signup(formData);
+        const result = await signup(formData);
+        if (result?.error) setError(result.error);
+        if (result?.message) {
+          setMessage(result.message);
+          setMode("login");
+        }
       }
     } catch {
-      // redirect throws — this is expected
+      // redirect() throws — this is expected on successful login
     } finally {
       setLoading(false);
     }
@@ -32,11 +42,18 @@ export default function LoginPage() {
 
   const handleGoogle = async () => {
     setGoogleLoading(true);
-    try {
-      await signInWithGoogle();
-    } catch {
-      // redirect throws — this is expected
-    } finally {
+    setError(null);
+
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
+
+    if (error) {
+      setError(error.message);
       setGoogleLoading(false);
     }
   };

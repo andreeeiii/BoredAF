@@ -97,7 +97,7 @@ describe("Auth Server Actions", () => {
   });
 
   describe("login", () => {
-    it("calls signInWithPassword with email and password", async () => {
+    it("calls signInWithPassword and redirects on success", async () => {
       mockSignInWithPassword.mockResolvedValue({ error: null });
 
       const { login } = await import("@/app/login/actions");
@@ -113,7 +113,7 @@ describe("Auth Server Actions", () => {
       });
     });
 
-    it("redirects to /login with error on failure", async () => {
+    it("returns error object on failure", async () => {
       mockSignInWithPassword.mockResolvedValue({
         error: { message: "Invalid credentials" },
       });
@@ -123,12 +123,27 @@ describe("Auth Server Actions", () => {
       formData.set("email", "test@example.com");
       formData.set("password", "wrong");
 
-      await expect(login(formData)).rejects.toThrow("REDIRECT:/login?error=Invalid%20credentials");
+      const result = await login(formData);
+      expect(result).toEqual({ error: "Invalid credentials" });
+    });
+
+    it("returns friendly message for unverified email", async () => {
+      mockSignInWithPassword.mockResolvedValue({
+        error: { message: "Email not confirmed" },
+      });
+
+      const { login } = await import("@/app/login/actions");
+      const formData = new FormData();
+      formData.set("email", "test@example.com");
+      formData.set("password", "password123");
+
+      const result = await login(formData);
+      expect(result.error).toContain("verify your email");
     });
   });
 
   describe("signup", () => {
-    it("calls signUp with email and password", async () => {
+    it("calls signUp and returns success message", async () => {
       mockSignUp.mockResolvedValue({ error: null });
 
       const { signup } = await import("@/app/login/actions");
@@ -136,14 +151,15 @@ describe("Auth Server Actions", () => {
       formData.set("email", "new@example.com");
       formData.set("password", "password123");
 
-      await expect(signup(formData)).rejects.toThrow("REDIRECT:/login?message=");
+      const result = await signup(formData);
+      expect(result.message).toContain("verify your account");
       expect(mockSignUp).toHaveBeenCalledWith({
         email: "new@example.com",
         password: "password123",
       });
     });
 
-    it("redirects to /login with error on failure", async () => {
+    it("returns error object on failure", async () => {
       mockSignUp.mockResolvedValue({
         error: { message: "User already registered" },
       });
@@ -153,28 +169,8 @@ describe("Auth Server Actions", () => {
       formData.set("email", "existing@example.com");
       formData.set("password", "password123");
 
-      await expect(signup(formData)).rejects.toThrow("REDIRECT:/login?error=User%20already%20registered");
-    });
-  });
-
-  describe("signInWithGoogle", () => {
-    it("calls signInWithOAuth and redirects to Google URL", async () => {
-      mockSignInWithOAuth.mockResolvedValue({
-        data: { url: "https://accounts.google.com/o/oauth2/..." },
-        error: null,
-      });
-
-      const { signInWithGoogle } = await import("@/app/login/actions");
-
-      await expect(signInWithGoogle()).rejects.toThrow(
-        "REDIRECT:https://accounts.google.com/o/oauth2/..."
-      );
-      expect(mockSignInWithOAuth).toHaveBeenCalledWith({
-        provider: "google",
-        options: {
-          redirectTo: "http://localhost:3000/auth/callback",
-        },
-      });
+      const result = await signup(formData);
+      expect(result).toEqual({ error: "User already registered" });
     });
   });
 

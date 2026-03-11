@@ -3,62 +3,45 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { headers } from "next/headers";
 
-export async function login(formData: FormData) {
+export type AuthResult = {
+  error?: string;
+  message?: string;
+};
+
+export async function login(formData: FormData): Promise<AuthResult> {
   const supabase = createClient();
 
-  const data = {
+  const { error } = await supabase.auth.signInWithPassword({
     email: formData.get("email") as string,
     password: formData.get("password") as string,
-  };
-
-  const { error } = await supabase.auth.signInWithPassword(data);
+  });
 
   if (error) {
-    redirect("/login?error=" + encodeURIComponent(error.message));
+    // Supabase returns "Email not confirmed" for unverified accounts
+    if (error.message.toLowerCase().includes("email not confirmed")) {
+      return { error: "Please verify your email before logging in. Check your inbox for a confirmation link." };
+    }
+    return { error: error.message };
   }
 
   revalidatePath("/", "layout");
   redirect("/");
 }
 
-export async function signup(formData: FormData) {
+export async function signup(formData: FormData): Promise<AuthResult> {
   const supabase = createClient();
 
-  const data = {
+  const { error } = await supabase.auth.signUp({
     email: formData.get("email") as string,
     password: formData.get("password") as string,
-  };
-
-  const { error } = await supabase.auth.signUp(data);
-
-  if (error) {
-    redirect("/login?error=" + encodeURIComponent(error.message));
-  }
-
-  revalidatePath("/", "layout");
-  redirect("/login?message=" + encodeURIComponent("Check your email to confirm your account."));
-}
-
-export async function signInWithGoogle() {
-  const supabase = createClient();
-  const origin = headers().get("origin") ?? "http://localhost:3000";
-
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo: `${origin}/auth/callback`,
-    },
   });
 
   if (error) {
-    redirect("/login?error=" + encodeURIComponent(error.message));
+    return { error: error.message };
   }
 
-  if (data.url) {
-    redirect(data.url);
-  }
+  return { message: "Check your email to verify your account before logging in." };
 }
 
 export async function logout() {
