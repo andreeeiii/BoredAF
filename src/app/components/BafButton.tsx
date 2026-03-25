@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import ShareModal from "./ShareModal";
 import { SharePlatform } from "@/types/share";
 import { generateSocialCard } from "@/lib/socialCard";
-import { handleShare } from "@/lib/shareUtils";
+import { handleShare as handleShareAction } from "@/lib/shareUtils";
 
 type BafState = "idle" | "thinking" | "suggestion" | "why" | "accepted";
 
@@ -152,11 +152,11 @@ export default function BafButton() {
       });
 
       // Handle the share
-      await handleShare(platform, rescue.suggestion, socialCardUrl);
+      await handleShareAction(platform, rescue.suggestion, socialCardUrl);
     } catch (error) {
       console.error('Share failed:', error);
       // Fallback to text-only sharing
-      await handleShare(platform, rescue.suggestion);
+      await handleShareAction(platform, rescue.suggestion);
     }
   };
 
