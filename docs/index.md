@@ -1,7 +1,5 @@
 # BAF (BoredAF) Developer Portal
 
-![BAF Logo](assets/logo.png)
-
 ## Project Vision
 
 BAF (BoredAF) is an intelligent boredom alleviation system that leverages AI to provide personalized, contextually relevant suggestions when users are experiencing boredom. The system combines sophisticated persona modeling, content ranking algorithms, and real-time data sources to deliver engaging activities and experiences.
