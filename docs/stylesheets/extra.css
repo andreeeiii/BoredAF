@@ -1,0 +1,272 @@
+/* Extra styles for BAF Documentation */
+
+/* Custom color scheme */
+:root {
+  --md-primary-fg-color: #6200ea;
+  --md-primary-fg-color--light: #7c4dff;
+  --md-primary-fg-color--dark: #3700b3;
+  --md-accent-fg-color: #3f51b5;
+  --md-accent-fg-color--transparent: rgba(63, 81, 181, 0.1);
+}
+
+/* Custom typography */
+.md-typeset h1 {
+  color: var(--md-primary-fg-color);
+  font-weight: 700;
+}
+
+.md-typeset h2 {
+  color: var(--md-accent-fg-color);
+  font-weight: 600;
+}
+
+/* Custom code blocks */
+.md-typeset .highlight {
+  background-color: rgba(98, 0, 234, 0.05);
+  border-left: 4px solid var(--md-primary-fg-color);
+}
+
+.md-typeset .highlight .filename {
+  background-color: var(--md-primary-fg-color);
+  color: white;
+  font-weight: 600;
+}
+
+/* Custom admonitions */
+.md-typeset .admonition.important {
+  border-color: var(--md-primary-fg-color);
+}
+
+.md-typeset .admonition.important .admonition-title {
+  background-color: var(--md-primary-fg-color);
+}
+
+/* Custom tables */
+.md-typeset table:not([class]) {
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.md-typeset table:not([class]) th {
+  background-color: var(--md-primary-fg-color);
+  color: white;
+  font-weight: 600;
+}
+
+/* Custom mermaid diagrams */
+.mermaid {
+  background-color: rgba(98, 0, 234, 0.05);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+/* Custom navigation */
+.md-nav__title {
+  font-weight: 600;
+  color: var(--md-primary-fg-color);
+}
+
+/* Custom search results */
+.md-search-result__title {
+  color: var(--md-primary-fg-color);
+  font-weight: 600;
+}
+
+.md-search-result__teaser {
+  color: var(--md-default-fg-color--light);
+}
+
+/* Custom footer */
+.md-footer {
+  background-color: var(--md-primary-fg-color);
+}
+
+.md-footer-nav__title {
+  color: white;
+  font-weight: 600;
+}
+
+/* Custom header */
+.md-header {
+  background-color: var(--md-primary-fg-color);
+}
+
+.md-header__title {
+  font-weight: 700;
+}
+
+/* Custom tabs */
+.md-tabs__item {
+  font-weight: 600;
+}
+
+.md-tabs__item--active {
+  color: var(--md-primary-fg-color);
+}
+
+/* Custom progress indicator */
+.md-progress {
+  background-color: var(--md-accent-fg-color);
+}
+
+/* Custom tooltips */
+.md-tooltip {
+  background-color: var(--md-primary-fg-color);
+  color: white;
+}
+
+/* Custom badges */
+.md-typeset .badge {
+  background-color: var(--md-accent-fg-color);
+  color: white;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.8em;
+}
+
+/* Custom callouts */
+.md-typeset .callout {
+  background-color: rgba(98, 0, 234, 0.1);
+  border-left: 4px solid var(--md-primary-fg-color);
+  padding: 16px;
+  margin: 16px 0;
+  border-radius: 4px;
+}
+
+.md-typeset .callout .callout-title {
+  font-weight: 600;
+  color: var(--md-primary-fg-color);
+}
+
+/* Custom syntax highlighting */
+.md-typeset .codehilite {
+  background-color: #1e1e1e;
+  border-radius: 8px;
+  padding: 16px;
+  overflow-x: auto;
+}
+
+.md-typeset .codehilite pre {
+  margin: 0;
+  color: #d4d4d4;
+}
+
+/* Custom blockquotes */
+.md-typeset blockquote {
+  border-left: 4px solid var(--md-accent-fg-color);
+  background-color: rgba(63, 81, 181, 0.05);
+  padding: 16px;
+  margin: 16px 0;
+  border-radius: 4px;
+}
+
+.md-typeset blockquote p {
+  color: var(--md-default-fg-color--light);
+  font-style: italic;
+}
+
+/* Custom lists */
+.md-typeset ul li::marker {
+  color: var(--md-primary-fg-color);
+}
+
+.md-typeset ol li::marker {
+  color: var(--md-primary-fg-color);
+}
+
+/* Custom links */
+.md-typeset a {
+  color: var(--md-accent-fg-color);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-bottom-color 0.2s ease;
+}
+
+.md-typeset a:hover {
+  border-bottom-color: var(--md-accent-fg-color);
+}
+
+/* Custom emphasis */
+.md-typeset strong {
+  color: var(--md-primary-fg-color);
+  font-weight: 600;
+}
+
+/* Custom keyboard shortcuts */
+.md-typeset kbd {
+  background-color: var(--md-default-bg-color--light);
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.9em;
+  font-family: monospace;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Custom status indicators */
+.md-typeset .status {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.8em;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.md-typeset .status.success {
+  background-color: #4caf50;
+  color: white;
+}
+
+.md-typeset .status.warning {
+  background-color: #ff9800;
+  color: white;
+}
+
+.md-typeset .status.error {
+  background-color: #f44336;
+  color: white;
+}
+
+.md-typeset .status.info {
+  background-color: var(--md-accent-fg-color);
+  color: white;
+}
+
+/* Responsive adjustments */
+@media screen and (max-width: 768px) {
+  .md-typeset h1 {
+    font-size: 2rem;
+  }
+  
+  .md-typeset h2 {
+    font-size: 1.5rem;
+  }
+  
+  .md-typeset .codehilite {
+    padding: 12px;
+    font-size: 0.9em;
+  }
+}
+
+/* Print styles */
+@media print {
+  .md-header,
+  .md-sidebar,
+  .md-footer {
+    display: none;
+  }
+  
+  .md-content {
+    margin: 0;
+    padding: 0;
+  }
+  
+  .md-typeset {
+    font-size: 12pt;
+    line-height: 1.4;
+  }
+}
