@@ -34,6 +34,28 @@ export const RescueSchema = z.object({
 
 export type Rescue = z.infer<typeof RescueSchema>;
 
+export { validateLinkTextConsistency, extractSubjectName } from "./linkIntegrity";
+import { validateLinkTextConsistency } from "./linkIntegrity";
+
+function buildRescueFromRankedItem(
+  item: RankedItem,
+  archetype: string,
+  ranked: RankedItem[]
+): Rescue {
+  const base: Rescue = {
+    suggestion: `${item.isLive ? "🔴 LIVE: " : ""}${item.title.slice(0, 60)}`,
+    emoji: item.isLive ? "🔴" : "🎯",
+    vibe: item.isLive ? "live" : "discover",
+    source: item.platform as Rescue["source"],
+    link: item.url,
+    isLive: item.isLive,
+    archetype,
+    poolId: (item.metadata?.poolId as string) ?? null,
+    category: (item.metadata?.category as string) ?? null,
+  };
+  return enrichWithTwitchMeta(base, ranked);
+}
+
 const BafState = Annotation.Root({
   userId: Annotation<string>,
   userPersona: Annotation<Persona | null>,
@@ -316,19 +338,12 @@ async function reasoningNode(
   if (!apiKey) {
     const topItem = (state.rankedContent ?? [])[0];
     if (topItem) {
-      const base: Rescue = {
-        suggestion: `Check out: ${topItem.title.slice(0, 60)}`,
-        emoji: topItem.isLive ? "\uD83D\uDD34" : "\uD83C\uDFAF",
-        vibe: topItem.isLive ? "live" : "discover",
-        source: topItem.platform as Rescue["source"],
-        link: topItem.url,
-        isLive: topItem.isLive,
-        archetype: state.mood?.effectiveArchetype ?? "The Spark",
-        poolId: (topItem.metadata?.poolId as string) ?? null,
-        category: (topItem.metadata?.category as string) ?? null,
-      };
       return {
-        finalRescue: enrichWithTwitchMeta(base, state.rankedContent ?? []),
+        finalRescue: buildRescueFromRankedItem(
+          topItem,
+          state.mood?.effectiveArchetype ?? "The Spark",
+          state.rankedContent ?? []
+        ),
       };
     }
     return {
@@ -363,10 +378,10 @@ async function reasoningNode(
   const allRanked = state.rankedContent ?? [];
   const ranked = weightedTopPick(allRanked).slice(0, 8);
   const contentList = ranked.length > 0
-    ? ranked.map((r) =>
-        `[${r.platform.toUpperCase()}${r.isLive ? " 🔴 LIVE" : ""}] "${r.title}" — ${r.url} (score: ${r.score})`
+    ? ranked.map((r, i) =>
+        `[${i}] [${r.platform.toUpperCase()}${r.isLive ? " 🔴 LIVE" : ""}] "${r.title}" — ${r.url} (score: ${r.score})`
       ).join("\n")
-    : "No live content available";
+    : "No content available";
 
   const liveStreams = ranked.filter((r) => r.isLive);
   const hasLive = liveStreams.length > 0;
@@ -400,10 +415,10 @@ ${mood.moodOverride ? `- Mood shifted from "${state.userPersona.profile.archetyp
 
 ABSOLUTE RULES (violating ANY = failure):
 1. PERSONA-FIRST: Only suggest content that matches the user's CORE INTERESTS listed above. If the content doesn't connect to their interests, DO NOT suggest it.
-2. You MUST include a real clickable URL in the "link" field from the RANKED CONTENT below.
-3. Do NOT make up URLs. Only use URLs from the list.
+2. You MUST pick a content item by its INDEX number from the RANKED CONTENT below. Return the index in the "pick" field.
+3. Do NOT make up URLs or content. Only pick from the numbered list.
 4. ALL content must be family-friendly.
-5. MAX 15 words. Be witty, punchy, specific.
+5. MAX 15 words for "suggestion". Be witty, punchy, specific. MUST reference the same creator/subject as the picked item.
 6. STRICT ROTATION: You are FORBIDDEN from suggesting the same platform twice in a row. Recent: [${recentPlatformList || "none"}]. Pick a DIFFERENT platform.
 ${(state.blacklistedPlatforms ?? []).length > 0 ? `7. BLACKLISTED (user rejected — DO NOT suggest): [${(state.blacklistedPlatforms ?? []).join(", ")}]. These are BANNED.\n` : ""}8. Every "Nah" = COMMAND to switch to a COMPLETELY different platform AND subject. Never retry rejected categories.
 ${archetype === "The Spark" ? "9. SPARK MODE: Pick the most unexpected/unusual content." : ""}
@@ -411,7 +426,7 @@ ${archetype === "The Grind" ? `9. GRIND MODE: Chess ELO is ${chessElo ?? "unknow
 ${archetype === "The Chill" ? "9. CHILL MODE: Passive, relaxing content only." : ""}
 ${hasLive ? `\n🔴 LIVE STREAMS AVAILABLE — Strongly prefer these.` : ""}
 
-RANKED CONTENT (pick from these — higher score = better persona match):
+RANKED CONTENT (pick ONE by index number — higher score = better persona match):
 ${contentList}
 
 PREVIOUS SUGGESTIONS (NEVER repeat):
@@ -424,7 +439,7 @@ ACCEPTS:
 ${accepts ? `- ${accepts}` : "None"}
 
 Respond in EXACTLY this JSON format:
-{"suggestion": "unique witty text max 15 words", "emoji": "one emoji", "vibe": "one word", "source": "youtube|chess|twitch|tiktok|general|semantic|custom", "link": "real_url_from_list_above_or_null_for_semantic", "isLive": false}`;
+{"pick": 0, "suggestion": "unique witty text about the picked item max 15 words", "emoji": "one emoji", "vibe": "one word", "isLive": false}`;
 
   try {
     // Check reasoning cache first (prevents duplicate LLM calls on rapid clicks)
@@ -438,11 +453,11 @@ Respond in EXACTLY this JSON format:
       const response = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         temperature: 0.95,
-        max_tokens: 500,
+        max_tokens: 300,
         messages: [
           {
             role: "system",
-            content: "You are an adaptive life-coach and content curator for the BAF (BoredAF) app. You MUST respond with ONLY valid JSON, no markdown, no explanation.",
+            content: "You are an adaptive life-coach and content curator for the BAF (BoredAF) app. You MUST respond with ONLY valid JSON, no markdown, no explanation. The 'pick' field MUST be a valid index number from the ranked content list.",
           },
           { role: "user", content: prompt },
         ],
@@ -458,22 +473,64 @@ Respond in EXACTLY this JSON format:
 
     const parsed = JSON.parse(jsonMatch[0]);
 
-    if (parsed.link === "null" || parsed.link === "") {
-      const topItem = ranked[0];
-      parsed.link = topItem?.url ?? null;
+    // --- Index-Based Resolution ---
+    // The LLM returns "pick" (index into ranked array). We resolve all fields from the ranked item.
+    let pickIndex = typeof parsed.pick === "number" ? parsed.pick : 0;
+    if (pickIndex < 0 || pickIndex >= ranked.length) {
+      console.log(`[BAF][LinkIntegrity] Invalid pick index ${pickIndex} (max: ${ranked.length - 1}) — falling back to 0`);
+      pickIndex = 0;
     }
 
-    if (!parsed.isLive) parsed.isLive = false;
+    const pickedItem = ranked[pickIndex];
+    if (!pickedItem) {
+      // No ranked items at all — use fallback
+      return {
+        finalRescue: {
+          suggestion: getDefaultRescue(previousSuggestions),
+          emoji: "🎯",
+          vibe: "surprise",
+          source: "fallback",
+          link: null,
+          isLive: false,
+          archetype,
+        },
+      };
+    }
 
-    parsed.archetype = archetype;
+    // Validate LLM suggestion text matches the picked item
+    const llmSuggestion = parsed.suggestion ?? "";
+    const isConsistent = validateLinkTextConsistency(llmSuggestion, pickedItem.title);
 
-    const rescue = enrichWithTwitchMeta(
-      RescueSchema.parse(parsed),
+    let finalSuggestion: string;
+    if (isConsistent && llmSuggestion.length > 0) {
+      finalSuggestion = llmSuggestion;
+      console.log(`[BAF][LinkIntegrity] PASS — LLM text matches picked item "${pickedItem.title.slice(0, 30)}..."`);
+    } else {
+      finalSuggestion = pickedItem.title.slice(0, 80);
+      console.log(`[BAF][LinkIntegrity] MISMATCH — LLM wrote "${llmSuggestion.slice(0, 30)}..." but picked "${pickedItem.title.slice(0, 30)}..." — using pool text`);
+    }
+
+    // Build rescue with deterministic fields from the picked ranked item
+    const rescue: Rescue = {
+      suggestion: finalSuggestion,
+      emoji: parsed.emoji ?? "🎯",
+      vibe: parsed.vibe ?? "discover",
+      source: pickedItem.platform as Rescue["source"],
+      link: pickedItem.url,
+      isLive: pickedItem.isLive,
+      archetype,
+      poolId: (pickedItem.metadata?.poolId as string) ?? null,
+      category: (pickedItem.metadata?.category as string) ?? null,
+    };
+
+    const validatedRescue = enrichWithTwitchMeta(
+      RescueSchema.parse(rescue),
       ranked
     );
 
+    // Check for duplicates
     const isDuplicate = previousSuggestions.some(
-      (prev) => prev.toLowerCase() === rescue.suggestion.toLowerCase()
+      (prev) => prev.toLowerCase() === validatedRescue.suggestion.toLowerCase()
     );
 
     if (isDuplicate) {
@@ -485,19 +542,8 @@ Respond in EXACTLY this JSON format:
       );
 
       if (fallbackItem) {
-        const base: Rescue = {
-          suggestion: `${fallbackItem.isLive ? "🔴 LIVE: " : ""}${fallbackItem.title.slice(0, 60)}`,
-          emoji: fallbackItem.isLive ? "🔴" : "🎯",
-          vibe: fallbackItem.isLive ? "live" : "discover",
-          source: fallbackItem.platform as Rescue["source"],
-          link: fallbackItem.url,
-          isLive: fallbackItem.isLive,
-          archetype,
-          poolId: (fallbackItem.metadata?.poolId as string) ?? null,
-          category: (fallbackItem.metadata?.category as string) ?? null,
-        };
         return {
-          finalRescue: enrichWithTwitchMeta(base, ranked),
+          finalRescue: buildRescueFromRankedItem(fallbackItem, archetype, ranked),
         };
       }
 
@@ -514,23 +560,12 @@ Respond in EXACTLY this JSON format:
       };
     }
 
-    return { finalRescue: rescue };
+    return { finalRescue: validatedRescue };
   } catch {
     const topItem = (state.rankedContent ?? [])[0];
     if (topItem) {
-      const base: Rescue = {
-        suggestion: `${topItem.isLive ? "🔴 LIVE: " : ""}${topItem.title.slice(0, 60)}`,
-        emoji: topItem.isLive ? "🔴" : "🎯",
-        vibe: topItem.isLive ? "live" : "discover",
-        source: topItem.platform as Rescue["source"],
-        link: topItem.url,
-        isLive: topItem.isLive,
-        archetype,
-        poolId: (topItem.metadata?.poolId as string) ?? null,
-        category: (topItem.metadata?.category as string) ?? null,
-      };
       return {
-        finalRescue: enrichWithTwitchMeta(base, state.rankedContent ?? []),
+        finalRescue: buildRescueFromRankedItem(topItem, archetype, state.rankedContent ?? []),
       };
     }
     return {

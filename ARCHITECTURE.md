@@ -170,6 +170,33 @@ After fetching, a **ranking node** scores each piece of content:
 - **Graduated Rotation**: -60 for last platform, -30 for 2nd-last, -15 for 3rd-last
 - **Weighted Randomization**: Top-3 items shuffled by weighted random (higher score = higher probability, not guaranteed)
 
+## Link Integrity (Index-Based Selection)
+
+The LLM **never** generates free-form URLs. Instead, each ranked content item is assigned a numbered index, and the LLM returns the index of its pick. The system then uses the pool entry's own `content_text` + `url` pair, which are always correctly matched.
+
+```
+RANKED CONTENT (passed to LLM):
+  [0] [YOUTUBE] "MrBeast's latest challenge" — https://youtube.com/@MrBeast (score: 42)
+  [1] [TWITCH 🔴 LIVE] "GothamChess live chess" — https://twitch.tv/gothamchess (score: 38)
+  [2] [TIKTOK] "Khaby Lame life hacks" — https://tiktok.com/@khaby.lame (score: 35)
+
+LLM RETURNS:
+  {"pick": 1, "suggestion": "GothamChess is live — jump in!", "emoji": "♟️", ...}
+
+SYSTEM RESOLVES:
+  pick=1 → url="https://twitch.tv/gothamchess", poolId=<uuid>, category="influencer"
+```
+
+### Consistency Check
+After the LLM generates its `suggestion` text, a consistency check verifies the creator/subject name from the pool's `content_text` appears in the LLM's text:
+- Extract the subject name (text before " — " or first 2 words) from `content_text`
+- Check if it appears (case-insensitive) in the LLM's `suggestion`
+- **If mismatch**: discard LLM text, use pool's `content_text` directly
+- **If index out of bounds or missing**: fall back to top-ranked item
+
+### Why This Matters
+Previously, the LLM could write about "Creator A" while picking "Creator B"'s URL, causing users to land on the wrong page. Index-based selection makes `poolId`, `url`, `category`, and `content_text` deterministic from the ranked list.
+
 ## Persona-First Validation
 
 After reasoning, a **validation node** checks:
@@ -210,7 +237,7 @@ AI parses answers → maps to archetype + extracts interest tags + populates DB.
 - **Vector-First Fetch**: All suggestions come from the `suggestion_pool` vector DB — no hardcoded defaults
 - **LIVE Detection**: Twitch streams get glowing "LIVE NOW" badge + priority boost
 - **Rich Twitch Cards**: Stream title, game, viewer count displayed in purple UI strip
-- **Forced Links**: Every suggestion includes a clickable URL from real content
+- **Link Integrity**: Index-based LLM selection guarantees suggestion text matches the URL (no free-form URL generation)
 - **Platform Icons**: Color-coded per platform (YouTube red, Twitch purple, TikTok, Chess green)
 - **Archetype Tracking**: Every baf_history entry records which archetype was used
 - **Family-Friendly**: All suggestions appropriate for all ages
