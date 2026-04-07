@@ -3,6 +3,7 @@ import { runBafBrain } from "@/lib/agent/bafBrain";
 import { updatePersona, logNegativeSignal } from "@/lib/persona";
 import { getAuthUserId } from "@/lib/supabase/api";
 import { checkPressLimit, recordPress } from "@/lib/pressLimiter";
+import { updatePoolEngagement } from "@/lib/embeddings";
 
 export async function POST(request: Request) {
   try {
@@ -31,6 +32,13 @@ export async function POST(request: Request) {
       }
 
       const rescue = await runBafBrain(userId);
+
+      // Increment times_shown on display (fire-and-forget)
+      if (rescue.poolId) {
+        updatePoolEngagement(rescue.poolId, "shown").catch((err) =>
+          console.error("[BAF][Engagement] times_shown increment error:", err)
+        );
+      }
 
       // Record the press (increments counter, deducts credit if needed)
       if (!isDev) {

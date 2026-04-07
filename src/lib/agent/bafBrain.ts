@@ -16,6 +16,7 @@ import {
   fetchTwitchUsers,
   type TwitchStream,
 } from "../tools/socialTools";
+import { getSeenPoolIds, markSeen } from "./sessionSeenSet";
 
 export const RescueSchema = z.object({
   suggestion: z.string(),
@@ -136,10 +137,10 @@ async function poolFetchNode(
   let poolSuggestions: SemanticMatch[];
 
   if (personaEmbedding) {
-    poolSuggestions = await searchSemanticSuggestions(personaEmbedding, 20, 0.0);
+    poolSuggestions = await searchSemanticSuggestions(personaEmbedding, 50, 0.0);
     console.log(`[BAF][PoolFetch] Semantic search returned ${poolSuggestions.length} matches`);
   } else {
-    const popular = await fetchPopularSuggestions(20);
+    const popular = await fetchPopularSuggestions(50);
     poolSuggestions = popular.map((p) => ({
       ...p,
       similarity: 0.5,
@@ -203,6 +204,17 @@ async function poolFetchNode(
       }
     } catch (err) {
       console.error(`[BAF][LiveEnrich] Twitch check failed:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  // Filter out items already seen in this session
+  const seenIds = getSeenPoolIds(state.userId);
+  if (seenIds.size > 0) {
+    const before = poolSuggestions.length;
+    poolSuggestions = poolSuggestions.filter((s) => !seenIds.has(s.id));
+    const filtered = before - poolSuggestions.length;
+    if (filtered > 0) {
+      console.log(`[BAF][SessionSeen] Filtered ${filtered} already-seen items from pool`);
     }
   }
 
@@ -711,15 +723,20 @@ export async function runBafBrain(userId: string): Promise<Rescue> {
     error: null,
   });
 
-  return (
-    result.finalRescue ?? {
-      suggestion: getDefaultRescue(),
-      emoji: "🌀",
-      vibe: "mystery",
-      source: "fallback",
-      link: null,
-      isLive: false,
-      archetype: "fallback",
-    }
-  );
+  const rescue = result.finalRescue ?? {
+    suggestion: getDefaultRescue(),
+    emoji: "🌀",
+    vibe: "mystery",
+    source: "fallback" as const,
+    link: null,
+    isLive: false,
+    archetype: "fallback",
+  };
+
+  // Mark the shown poolId in the session seen-set so it won't be shown again
+  if (rescue.poolId) {
+    markSeen(userId, rescue.poolId);
+  }
+
+  return rescue;
 }

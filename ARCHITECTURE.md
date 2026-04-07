@@ -163,12 +163,13 @@ After fetching, a **ranking node** scores each piece of content:
 - **LIVE bonus**: +50 for Chill and Spark archetypes
 - **Archetype bonuses**: Grind → Chess +30; Chill → Twitch +20; Spark → least-used +25
 - **Platform rotation penalty**: -40 if same platform 3x in a row
-- **Duplicate penalty**: -100 if content URL matches any previous suggestion's URL (URL-based, not text-based)
+- **Duplicate penalty**: -999 if content URL matches any previous suggestion's URL (effectively blocks duplicates, same as blacklist)
 - **Category Cooldown**: -80% if platform appeared 3+ times in last 5 history entries
 - **Circuit Breaker Weights**: Score × category weight (0.0–1.0 based on rejection history)
 - **Item Blacklist**: Score = -999 for specific URLs rejected in last 60 minutes (no platform-level blacklist)
 - **Graduated Rotation**: -60 for last platform, -30 for 2nd-last, -15 for 3rd-last
 - **Weighted Randomization**: Top-3 items shuffled by weighted random (higher score = higher probability, not guaranteed)
+- **Diversity Quota**: Top-8 items passed to LLM must include at least 3 different platforms (when available). Mono-platform runs are broken by promoting items from underrepresented platforms.
 
 ## Link Integrity (Index-Based Selection)
 
@@ -232,7 +233,9 @@ AI parses answers → maps to archetype + extracts interest tags + populates DB.
 - **Weighted Randomization**: Top-3 picks shuffled by weighted random to prevent "mathematical winner" always winning
 - **Interest-Gated Fetching**: Tools only fetch data for platforms the user actually has interests in
 - **Negative Signals**: Rejection reasons logged per category, adjusting future suggestions
-- **No-Repeat Engine**: Full history check + server-side duplicate detection + unique request IDs
+- **No-Repeat Engine**: Full history check (30 entries) + server-side duplicate detection + unique request IDs
+- **Session Seen-Set**: In-memory per-user set tracks every poolId shown in the current session (30-min TTL). Users never see the same item twice per session.
+- **Diversity Quota**: Ranking enforces ≥3 different platforms in top-8 results (when pool has them)
 - **Ranking Engine**: Priority scoring per archetype, LIVE +50 bonus, cooldown/blacklist/weight penalties
 - **Vector-First Fetch**: All suggestions come from the `suggestion_pool` vector DB — no hardcoded defaults
 - **LIVE Detection**: Twitch streams get glowing "LIVE NOW" badge + priority boost
@@ -242,7 +245,7 @@ AI parses answers → maps to archetype + extracts interest tags + populates DB.
 - **Archetype Tracking**: Every baf_history entry records which archetype was used
 - **Family-Friendly**: All suggestions appropriate for all ages
 - **Fallback Rescues**: 10 default activity suggestions if pool is empty AND APIs fail
-- **Dynamic Pool Engagement**: Every accept/reject updates `times_shown`/`times_accepted`/`times_rejected` counters on the pool entry
+- **Dynamic Pool Engagement**: `times_shown` incremented on every display (not just feedback). `times_accepted`/`times_rejected` updated on feedback.
 
 ## Post-Onboarding Pool Seeding (Personalized Day-One Content)
 

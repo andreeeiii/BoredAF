@@ -147,8 +147,8 @@ export function rankContent(
          item.title.toLowerCase().includes(prev.toLowerCase().slice(0, 20)))
     );
     if (isDuplicateUrl || isDuplicateTitle) {
-      console.log(`[BAF][Duplicate] "${item.title.slice(0, 30)}" matches previous suggestion — score ${item.score} → ${item.score - 100}`);
-      item.score -= 100;
+      console.log(`[BAF][Duplicate] "${item.title.slice(0, 30)}" matches previous suggestion — score ${item.score} → -999`);
+      item.score = -999;
     }
 
     const last5Sources = recentHistory.slice(0, 5).map((h) => h.source ?? "");
@@ -192,5 +192,76 @@ export function rankContent(
 
   const sorted = items.sort((a, b) => b.score - a.score);
   console.log(`[BAF][Ranking] Final scores: ${sorted.map((i) => `${i.platform}:${i.score}`).join(", ")}`);
-  return sorted;
+
+  // Diversity quota: ensure top-8 has at least 3 different platforms (when available)
+  return enforceDiversityQuota(sorted);
+}
+
+/**
+ * Enforce platform diversity in the top-8 items passed to the LLM.
+ * If the top-8 has fewer than 3 platforms, promote items from underrepresented
+ * platforms into the top-8 by swapping with over-represented ones.
+ */
+export function enforceDiversityQuota(sorted: RankedItem[], topN: number = 8, minPlatforms: number = 3): RankedItem[] {
+  if (sorted.length <= topN) return sorted;
+
+  const top = sorted.slice(0, topN);
+  const rest = sorted.slice(topN);
+
+  const platformsInTop = new Set(top.filter((i) => i.score > -900).map((i) => i.platform));
+  if (platformsInTop.size >= minPlatforms) return sorted;
+
+  // Find platforms NOT in top that exist in rest with positive scores
+  const missingPlatforms = new Set<string>();
+  for (const item of rest) {
+    if (item.score > -900 && !platformsInTop.has(item.platform)) {
+      missingPlatforms.add(item.platform);
+    }
+  }
+
+  if (missingPlatforms.size === 0) return sorted;
+
+  // For each missing platform, promote the best item from rest into top
+  const result = [...sorted];
+  for (const platform of Array.from(missingPlatforms)) {
+    if (platformsInTop.size >= minPlatforms) break;
+
+    const promoteIdx = result.findIndex(
+      (item, idx) => idx >= topN && item.platform === platform && item.score > -900
+    );
+    if (promoteIdx === -1) continue;
+
+    // Find the last over-represented item in top to demote
+    const platformCounts: Record<string, number> = {};
+    for (let i = 0; i < topN && i < result.length; i++) {
+      const p = result[i].platform;
+      platformCounts[p] = (platformCounts[p] ?? 0) + 1;
+    }
+    const overRepPlatform = Object.entries(platformCounts)
+      .filter(([, count]) => count >= 2)
+      .sort((a, b) => b[1] - a[1])[0]?.[0];
+
+    if (!overRepPlatform) break;
+
+    // Find last occurrence of over-represented platform in top
+    let demoteIdx = -1;
+    for (let i = topN - 1; i >= 0; i--) {
+      if (result[i].platform === overRepPlatform) {
+        demoteIdx = i;
+        break;
+      }
+    }
+
+    if (demoteIdx === -1) break;
+
+    // Swap
+    const promoted = result[promoteIdx];
+    const demoted = result[demoteIdx];
+    result[demoteIdx] = promoted;
+    result[promoteIdx] = demoted;
+    platformsInTop.add(platform);
+    console.log(`[BAF][Diversity] Promoted "${promoted.platform}" (score ${promoted.score}) into top-${topN}, demoted "${demoted.platform}" (score ${demoted.score})`);
+  }
+
+  return result;
 }
