@@ -140,6 +140,7 @@ export interface SemanticMatch {
   times_accepted: number;
   times_rejected: number;
   similarity: number;
+  created_at?: string;
 }
 
 export async function searchSemanticSuggestions(

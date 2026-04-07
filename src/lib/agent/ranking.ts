@@ -1,6 +1,31 @@
 import type { Archetype } from "../mood";
 import type { SemanticMatch } from "../embeddings";
 import type { TwitchStream } from "../tools/socialTools";
+import { isUrlUnhealthy } from "./urlHealthCache";
+
+/**
+ * Compute freshness decay penalty based on pool entry age.
+ * Returns 0 for entries < 30 days old, -5 at 30d, -10 at 60d, -15 at 90+ days.
+ */
+export function computeFreshnessDecay(createdAt: string | undefined): number {
+  if (!createdAt) return 0;
+  const ageMs = Date.now() - new Date(createdAt).getTime();
+  const ageDays = ageMs / (1000 * 60 * 60 * 24);
+  if (ageDays < 30) return 0;
+  if (ageDays < 60) return -5;
+  if (ageDays < 90) return -10;
+  return -15;
+}
+
+/**
+ * Determine if this request should trigger exploration mode.
+ * Returns true ~15% of the time (serendipity injection).
+ * Accepts an optional random value for deterministic testing.
+ */
+export function shouldExplore(randomValue?: number): boolean {
+  const val = randomValue ?? Math.random();
+  return val < 0.15;
+}
 
 export interface RankedItem {
   platform: string;
@@ -59,17 +84,28 @@ export function rankContent(
       isLive = true;
     }
 
+    // Freshness decay: older entries get penalized
+    const freshnessDecay = computeFreshnessDecay(entry.created_at);
+
+    // URL health check: known-bad URLs get blocked
+    const urlHealthPenalty = (entry.url && isUrlUnhealthy(entry.url)) ? -999 : 0;
+
+    const totalScore = urlHealthPenalty === -999
+      ? -999
+      : baseScore + engagementBonus + sponsorBonus + (isLive ? 50 : 0) + freshnessDecay;
+
     items.push({
       platform: entry.platform || "general",
       title: entry.content_text,
       url: entry.url || "",
-      score: baseScore + engagementBonus + sponsorBonus + (isLive ? 50 : 0),
+      score: totalScore,
       isLive,
       metadata: {
         category: entry.category,
         similarity: entry.similarity,
         poolId: entry.id,
         isSponsored,
+        createdAt: entry.created_at,
         ...(isSponsored ? { sponsorId: entryAny.sponsor_id } : {}),
         ...(liveData ? {
           username: liveData.username,
@@ -79,6 +115,12 @@ export function rankContent(
         } : {}),
       },
     });
+
+    if (urlHealthPenalty === -999) {
+      console.log(`[BAF][URLHealth] "${entry.url}" is flagged unhealthy — score = -999`);
+    } else if (freshnessDecay < 0) {
+      console.log(`[BAF][Freshness] "${entry.content_text.slice(0, 30)}" age decay: ${freshnessDecay}`);
+    }
   }
 
   // Cap sponsored entries: max 1 sponsored in top 5
@@ -190,6 +232,12 @@ export function rankContent(
     }
   }
 
+  // Category variety bonus: within each platform, boost underrepresented categories
+  applyCategoryVarietyBonus(items);
+
+  // Exploration bonus: ~15% chance to boost a random low-ranked non-blacklisted item
+  applyExplorationBonus(items);
+
   const sorted = items.sort((a, b) => b.score - a.score);
   console.log(`[BAF][Ranking] Final scores: ${sorted.map((i) => `${i.platform}:${i.score}`).join(", ")}`);
 
@@ -264,4 +312,74 @@ export function enforceDiversityQuota(sorted: RankedItem[], topN: number = 8, mi
   }
 
   return result;
+}
+
+/**
+ * Category variety bonus: within each platform, if only one category dominates,
+ * give +10 to items from underrepresented categories.
+ * This prevents all-influencer or all-gaming runs within a single platform.
+ */
+export function applyCategoryVarietyBonus(items: RankedItem[]): void {
+  // Group non-blacklisted items by platform
+  const byPlatform: Record<string, RankedItem[]> = {};
+  for (const item of items) {
+    if (item.score <= -900) continue;
+    const p = item.platform;
+    if (!byPlatform[p]) byPlatform[p] = [];
+    byPlatform[p].push(item);
+  }
+
+  for (const platformItems of Object.values(byPlatform)) {
+    if (platformItems.length < 3) continue;
+
+    // Count categories
+    const categoryCounts: Record<string, number> = {};
+    for (const item of platformItems) {
+      const cat = (item.metadata.category as string) ?? "general";
+      categoryCounts[cat] = (categoryCounts[cat] ?? 0) + 1;
+    }
+
+    const totalCategories = Object.keys(categoryCounts).length;
+    if (totalCategories <= 1) continue;
+
+    // Find the dominant category (most items)
+    const dominantCategory = Object.entries(categoryCounts)
+      .sort((a, b) => b[1] - a[1])[0][0];
+    const dominantCount = categoryCounts[dominantCategory];
+
+    // If dominant category has ≥60% of items, boost the underdogs
+    if (dominantCount / platformItems.length >= 0.6) {
+      for (const item of platformItems) {
+        const cat = (item.metadata.category as string) ?? "general";
+        if (cat !== dominantCategory) {
+          item.score += 10;
+          console.log(`[BAF][CategoryVariety] "${item.title.slice(0, 30)}" (${cat}) boosted +10 vs dominant "${dominantCategory}"`);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Exploration bonus (serendipity): ~15% chance per request to boost a random
+ * low-similarity, non-blacklisted item by +20. Breaks echo chambers by
+ * surfacing unexpected content from outside the user's usual interest graph.
+ * Accepts an optional random value for deterministic testing.
+ */
+export function applyExplorationBonus(items: RankedItem[], randomOverride?: number): void {
+  if (!shouldExplore(randomOverride)) return;
+
+  // Find eligible items: non-blacklisted, low similarity (bottom 50%)
+  const eligible = items
+    .filter((i) => i.score > -900)
+    .sort((a, b) => (a.metadata.similarity as number ?? 0) - (b.metadata.similarity as number ?? 0));
+
+  if (eligible.length < 4) return;
+
+  // Pick from the bottom half of similarity scores
+  const bottomHalf = eligible.slice(0, Math.ceil(eligible.length / 2));
+  const pick = bottomHalf[Math.floor(Math.random() * bottomHalf.length)];
+
+  pick.score += 20;
+  console.log(`[BAF][Exploration] Serendipity boost +20 for "${pick.title.slice(0, 30)}" (${pick.platform}, sim=${(pick.metadata.similarity as number ?? 0).toFixed(3)})`);
 }

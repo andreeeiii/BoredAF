@@ -17,6 +17,7 @@ import {
   type TwitchStream,
 } from "../tools/socialTools";
 import { getSeenPoolIds, markSeen } from "./sessionSeenSet";
+import { flagUnhealthyUrl } from "./urlHealthCache";
 
 export const RescueSchema = z.object({
   suggestion: z.string(),
@@ -197,7 +198,11 @@ async function poolFetchNode(
           const foundInApi = usersResult.users.some((u) => u.login === username);
           if (!foundInApi) {
             console.log(`[BAF][TwitchFilter] User "${username}" not found on Twitch — filtered`);
+            flagUnhealthyUrl(s.url, "twitch_user_not_found");
             return false;
+          }
+          if (!validUsernames.has(username)) {
+            flagUnhealthyUrl(s.url, "twitch_not_affiliate_partner");
           }
           return validUsernames.has(username);
         });

@@ -170,6 +170,10 @@ After fetching, a **ranking node** scores each piece of content:
 - **Graduated Rotation**: -60 for last platform, -30 for 2nd-last, -15 for 3rd-last
 - **Weighted Randomization**: Top-3 items shuffled by weighted random (higher score = higher probability, not guaranteed)
 - **Diversity Quota**: Top-8 items passed to LLM must include at least 3 different platforms (when available). Mono-platform runs are broken by promoting items from underrepresented platforms.
+- **Exploration Bonus (Serendipity)**: 15% chance per request to inject a random pool entry from outside the user's top interests into the ranked list with a +20 bonus. Breaks echo chambers by surfacing unexpected content.
+- **Freshness Decay**: Pool entries older than 30 days receive a gradual score penalty: -5 at 30d, -10 at 60d, -15 at 90+ days. Keeps suggestions feeling current.
+- **Category Variety Bonus**: Within each platform in the top-8, if a category (e.g., "learning" vs "influencer") is underrepresented, it gets a +10 bonus. Prevents all-influencer or all-gaming runs.
+- **URL Health Cache**: In-memory cache of known-bad URLs (404s, deleted channels). Entries are flagged during failed link opens (client-side reporting) or Twitch validation failures. Flagged URLs get score = -999 at ranking time. Cache has 24-hour TTL.
 
 ## Link Integrity (Index-Based Selection)
 
@@ -246,6 +250,10 @@ AI parses answers → maps to archetype + extracts interest tags + populates DB.
 - **Family-Friendly**: All suggestions appropriate for all ages
 - **Fallback Rescues**: 10 default activity suggestions if pool is empty AND APIs fail
 - **Dynamic Pool Engagement**: `times_shown` incremented on every display (not just feedback). `times_accepted`/`times_rejected` updated on feedback.
+- **Exploration Mode (Serendipity)**: 15% chance to inject unexpected content from outside the user's interest bubble — prevents echo chambers
+- **Freshness Decay**: Older pool entries gradually lose ranking score — keeps suggestions feeling current
+- **Category Variety**: Within-platform category diversity bonus prevents all-influencer or all-gaming suggestion runs
+- **URL Health Cache**: Known-bad URLs (dead channels, 404s) are cached and filtered at ranking time with 24h TTL
 
 ## Post-Onboarding Pool Seeding (Personalized Day-One Content)
 
