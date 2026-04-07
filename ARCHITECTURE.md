@@ -44,7 +44,7 @@ Returning user → Dashboard directly
 ### Security
 - **RLS enabled** on `profiles`, `persona_stats`, `interests`, `baf_history`
 - **Policies**: users can only read/write their own data via `auth.uid() = user_id`
-- **Service role key**: server singleton bypasses RLS for trusted server-side operations
+- **Service role key**: server singleton bypasses RLS for trusted server-side operations (required for onboarding reset, pool seeding, user data wipe)
 - **`suggestion_pool`**: shared content, no RLS (all users read from the same pool)
 - **SQL trigger**: `handle_new_user()` auto-creates a `profiles` row on auth signup
 

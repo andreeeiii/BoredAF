@@ -23,11 +23,7 @@ export async function POST(request: Request) {
     }
 
     if (action === "reset") {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
+      const { supabase: sb } = await import("@/lib/supabase");
 
       await Promise.all([
         sb.from("persona_stats").delete().eq("user_id", userId),
@@ -37,7 +33,7 @@ export async function POST(request: Request) {
 
       await sb
         .from("profiles")
-        .update({ archetype: null })
+        .update({ archetype: null, persona_embedding: null })
         .eq("id", userId);
 
       return NextResponse.json({ success: true, message: "User reset — ready to re-onboard" });

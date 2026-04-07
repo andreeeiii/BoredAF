@@ -28,7 +28,7 @@ export interface Database {
           id?: string;
           username?: string | null;
           bio?: string | null;
-          archetype?: string;
+          archetype?: string | null;
           persona_embedding?: string | null;
         };
         Relationships: [];

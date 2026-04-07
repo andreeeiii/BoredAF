@@ -13,11 +13,19 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: path.resolve(__dirname, "../.env.local") });
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+const supabaseKey = serviceRoleKey ?? anonKey;
 
 if (!supabaseUrl || !supabaseKey) {
-  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY/NEXT_PUBLIC_SUPABASE_ANON_KEY");
   process.exit(1);
+}
+
+if (!serviceRoleKey) {
+  console.warn("⚠️  SUPABASE_SERVICE_ROLE_KEY not set — using anon key. RLS may block deletes on protected tables.");
+  console.warn("   Get it from Supabase Dashboard → Settings → API → Service Role Key");
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
