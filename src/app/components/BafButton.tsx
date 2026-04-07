@@ -2,8 +2,12 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import ShareModal from "./ShareModal";
+import { SharePlatform } from "@/types/share";
+import { generateSocialCard } from "@/lib/socialCard";
+import { handleShare as handleShareAction } from "@/lib/shareUtils";
 
-type BafState = "idle" | "thinking" | "suggestion" | "why";
+type BafState = "idle" | "thinking" | "suggestion" | "why" | "accepted";
 
 interface Rescue {
   suggestion: string;
@@ -40,6 +44,7 @@ export default function BafButton() {
   const [state, setState] = useState<BafState>("idle");
   const [rescue, setRescue] = useState<Rescue | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
   const handleBaf = async () => {
     setState("thinking");
@@ -85,8 +90,7 @@ export default function BafButton() {
       }),
     });
 
-    setState("idle");
-    setRescue(null);
+    setState("accepted");
   };
 
   const handleReject = () => {
@@ -130,6 +134,36 @@ export default function BafButton() {
     } catch {
       setState("idle");
     }
+  };
+
+  const handleOpenShare = async () => {
+    setIsShareModalOpen(true);
+  };
+
+  const handlePlatformShare = async (platform: SharePlatform) => {
+    if (!rescue) return;
+
+    try {
+      // Generate social card image
+      const socialCardUrl = await generateSocialCard({
+        suggestion: rescue.suggestion,
+        emoji: rescue.emoji,
+        vibe: rescue.vibe,
+      });
+
+      // Handle the share
+      await handleShareAction(platform, rescue.suggestion, socialCardUrl);
+    } catch (error) {
+      console.error('Share failed:', error);
+      // Fallback to text-only sharing
+      await handleShareAction(platform, rescue.suggestion);
+    }
+  };
+
+  const handleBackToBaf = () => {
+    setState("idle");
+    setRescue(null);
+    setIsShareModalOpen(false);
   };
 
   const platformStyle = rescue
@@ -332,7 +366,74 @@ export default function BafButton() {
             </button>
           </motion.div>
         )}
+
+        {state === "accepted" && rescue && (
+          <motion.div
+            key="accepted"
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.8, opacity: 0 }}
+            className="flex flex-col items-center gap-6 max-w-md text-center"
+          >
+            <motion.div
+              className="w-16 h-16 rounded-full bg-green-500 flex items-center justify-center"
+              animate={{ scale: [1, 1.2, 1] }}
+              transition={{ duration: 0.6, ease: "easeInOut" }}
+            >
+              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+              </svg>
+            </motion.div>
+            
+            <h2 className="text-2xl font-bold text-white">Rescue Accepted! 🎉</h2>
+            
+            <div className="flex flex-col items-center gap-3">
+              <motion.span
+                className="text-4xl"
+                animate={{ rotate: [0, -10, 10, -10, 0] }}
+                transition={{ duration: 0.5, delay: 0.2 }}
+              >
+                {rescue.emoji}
+              </motion.span>
+              <p className="text-white text-lg font-medium">
+                {rescue.suggestion}
+              </p>
+            </div>
+
+            <div className="flex gap-4 mt-4">
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleOpenShare}
+                className="px-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500
+                  text-white font-bold rounded-full text-lg
+                  shadow-[0_0_20px_rgba(99,102,241,0.4)]
+                  border border-purple-400/30
+                  transition-all duration-200"
+              >
+                Share My Rescue ✨
+              </motion.button>
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleBackToBaf}
+                className="px-6 py-3 bg-neutral-700 hover:bg-neutral-600
+                  text-white font-bold rounded-full text-lg
+                  transition-colors duration-200"
+              >
+                Back to BAF 🔥
+              </motion.button>
+            </div>
+          </motion.div>
+        )}
       </AnimatePresence>
+      
+      <ShareModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        suggestion={rescue?.suggestion || ""}
+        onShare={handlePlatformShare}
+      />
     </div>
   );
 }

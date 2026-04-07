@@ -1,0 +1,125 @@
+site_name: BAF (BoredAF) Developer Portal
+site_description: Developer documentation for the BAF (BoredAF) project
+site_author: BAF Development Team
+site_url: https://andreeeiii.github.io/BoredAF/
+
+# Repository
+repo_name: andreeeiii/BoredAF
+repo_url: https://github.com/andreeeiii/BoredAF
+edit_uri: edit/master/docs/
+
+# Theme
+theme:
+  name: material
+  language: en
+  features:
+    - search.suggest
+    - search.highlight
+    - search.share
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - toc.follow
+    - announce.dismiss
+  palette:
+    # Palette toggle for light mode
+    - scheme: default
+      primary: deep purple
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - scheme: slate
+      primary: deep purple
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Roboto
+    code: Roboto Mono
+
+# Plugins
+plugins:
+  - search:
+      separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])|\.(?!\d)|&[lg]t;'
+  - minify:
+      minify_html: true
+
+# Extensions
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - meta
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink:
+      repo_url_shorthand: true
+      user: andreeeiii
+      repo: BoredAF
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+# Navigation
+nav:
+  - Home: index.md
+  - Architecture:
+    - Brain Logic: brain-logic.md
+    - Data Schema: data-schema.md
+    - Economics Model: economics.md
+  - AI Context:
+    - AI Context Cheat Sheet: ai-context.md
+  - Development:
+    - Getting Started: getting-started.md
+    - API Reference: api-reference.md
+    - Deployment: deployment.md
+
+# Copyright
+copyright: |
+  &copy; 2024 BAF Development Team - 
+  <a href="#__consent">Change cookie settings</a>
+
+# Extra CSS/JS
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
