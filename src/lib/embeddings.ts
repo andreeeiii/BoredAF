@@ -485,8 +485,13 @@ async function validatePoolEntries(
     }
   });
 
-  // Check YouTube channels
+  // Check YouTube channels — only block if API actually returned data
+  const ytApiAvailable = ytStats.size > 0;
+  if (ytHandles.length > 0 && !ytApiAvailable) {
+    console.log(`[BAF][${logPrefix}] YouTube API unavailable — skipping validation for ${ytHandles.length} entries (letting them through)`);
+  }
   for (const { handle, index } of ytHandles) {
+    if (!ytApiAvailable) continue; // No API key — skip, don't block
     const stats = ytStats.get(handle.toLowerCase());
     if (!stats || !stats.exists) {
       console.log(`[BAF][${logPrefix}] YouTube channel "@${handle}" not found — filtered`);
@@ -499,7 +504,12 @@ async function validatePoolEntries(
     }
   }
 
-  // Check Twitch users
+  // Check Twitch users — only block if API actually returned data
+  // If error contains "not configured", API keys are missing — skip validation
+  const twitchApiAvailable = twitchResult.error === null || twitchResult.users.length > 0;
+  if (twitchUsernames.length > 0 && !twitchApiAvailable) {
+    console.log(`[BAF][${logPrefix}] Twitch API unavailable — skipping validation for ${twitchUsernames.length} entries (letting them through)`);
+  }
   const validTwitchLogins = new Set(
     twitchResult.users
       .filter((u) => u.broadcasterType === "partner" || u.broadcasterType === "affiliate")
@@ -507,6 +517,7 @@ async function validatePoolEntries(
   );
 
   for (const { username, index } of twitchUsernames) {
+    if (!twitchApiAvailable) continue; // No API key — skip, don't block
     const found = twitchResult.users.some((u) => u.login === username.toLowerCase());
     if (!found) {
       console.log(`[BAF][${logPrefix}] Twitch "${username}" not found — filtered`);
