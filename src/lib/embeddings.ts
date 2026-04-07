@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { supabase } from "./supabase";
 import { validateYouTubeChannels, extractYouTubeHandle } from "./tools/registry";
 import { fetchTwitchUsers } from "./tools/socialTools";
+import { isValidSuggestionUrl } from "./agent/linkIntegrity";
 
 const EMBEDDING_MODEL = "text-embedding-3-small";
 const EMBEDDING_DIMENSIONS = 1536;
@@ -354,8 +355,13 @@ Return ONLY a JSON array: [{"text": "CreatorName — what they do (under 60 char
           console.log(`[BAF][OnboardingSeed] Filtered Instagram URL: "${s.text.slice(0, 40)}..."`);
           return false;
         }
-        // General activities (no URL) don't need follower check
+        // General activities (no URL) don't need follower or URL check
         if (s.platform === "general") return true;
+        // Require valid external URL for platform-specific entries
+        if (!isValidSuggestionUrl(s.url)) {
+          console.log(`[BAF][OnboardingSeed] Filtered invalid/empty URL: "${s.text.slice(0, 40)}..." url="${s.url ?? ""}"`);
+          return false;
+        }
         // Require followers_approx for platform-specific entries
         if (s.followers_approx === undefined || s.followers_approx < MIN_FOLLOWERS) {
           console.log(`[BAF][OnboardingSeed] Filtered low/missing followers: "${s.text.slice(0, 40)}..." (${s.followers_approx ?? "unknown"} followers)`);
@@ -583,6 +589,11 @@ Rules:
           console.log(`[BAF][PoolExpansion] Filtered Instagram URL: "${s.text.slice(0, 40)}..."`);
           return false;
         }
+        // Require valid external URL
+        if (!isValidSuggestionUrl(s.url)) {
+          console.log(`[BAF][PoolExpansion] Filtered invalid URL: "${s.text.slice(0, 40)}..." url="${s.url}"`);
+          return false;
+        }
         // Require followers_approx for all platform-specific entries
         if (s.followers_approx === undefined || s.followers_approx < MIN_FOLLOWERS) {
           console.log(`[BAF][PoolExpansion] Filtered low/missing followers: "${s.text.slice(0, 40)}..." (${s.followers_approx ?? "unknown"})`);
@@ -754,6 +765,11 @@ Return JSON array: [{"text": "CreatorName — description under 60 chars", "plat
           return false;
         }
         if (s.platform === "general") return true;
+        // Require valid external URL for platform-specific entries
+        if (!isValidSuggestionUrl(s.url)) {
+          console.log(`[BAF][RejectExpansion] Filtered invalid URL: "${s.text.slice(0, 40)}..." url="${s.url ?? ""}"`);
+          return false;
+        }
         // Require followers_approx for all platform-specific entries
         if (s.followers_approx === undefined || s.followers_approx < MIN_FOLLOWERS) {
           console.log(`[BAF][RejectExpansion] Filtered low/missing followers: "${s.text.slice(0, 40)}..." (${s.followers_approx ?? "unknown"})`);

@@ -37,7 +37,7 @@ export const RescueSchema = z.object({
 export type Rescue = z.infer<typeof RescueSchema>;
 
 export { validateLinkTextConsistency, extractSubjectName } from "./linkIntegrity";
-import { validateLinkTextConsistency } from "./linkIntegrity";
+import { validateLinkTextConsistency, sanitizeLink } from "./linkIntegrity";
 
 function buildRescueFromRankedItem(
   item: RankedItem,
@@ -49,7 +49,7 @@ function buildRescueFromRankedItem(
     emoji: item.isLive ? "🔴" : "🎯",
     vibe: item.isLive ? "live" : "discover",
     source: item.platform as Rescue["source"],
-    link: item.url,
+    link: sanitizeLink(item.url),
     isLive: item.isLive,
     archetype,
     poolId: (item.metadata?.poolId as string) ?? null,
@@ -533,7 +533,7 @@ Respond in EXACTLY this JSON format:
       emoji: parsed.emoji ?? "🎯",
       vibe: parsed.vibe ?? "discover",
       source: pickedItem.platform as Rescue["source"],
-      link: pickedItem.url,
+      link: sanitizeLink(pickedItem.url),
       isLive: pickedItem.isLive,
       archetype,
       poolId: (pickedItem.metadata?.poolId as string) ?? null,

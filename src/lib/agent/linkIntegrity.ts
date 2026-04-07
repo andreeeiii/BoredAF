@@ -62,3 +62,32 @@ export function extractSubjectName(contentText: string): string {
   const words = contentText.split(/\s+/).filter(Boolean);
   return words.slice(0, 3).join(" ");
 }
+
+/**
+ * Validate that a URL is a real, external suggestion link.
+ * Returns true only for http/https URLs pointing to known platforms.
+ * Returns false for empty strings, localhost, relative paths, or invalid URLs.
+ */
+export function isValidSuggestionUrl(url: string | null | undefined): boolean {
+  if (!url || url.trim().length === 0) return false;
+  const trimmed = url.trim();
+  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) return false;
+  try {
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0") return false;
+    if (!host.includes(".")) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Sanitize a URL for use as a suggestion link.
+ * Returns the URL if valid, or null if invalid.
+ */
+export function sanitizeLink(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return isValidSuggestionUrl(url) ? url.trim() : null;
+}

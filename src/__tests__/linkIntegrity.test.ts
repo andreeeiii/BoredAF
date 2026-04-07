@@ -1,6 +1,8 @@
 import {
   validateLinkTextConsistency,
   extractSubjectName,
+  isValidSuggestionUrl,
+  sanitizeLink,
 } from "@/lib/agent/linkIntegrity";
 
 describe("extractSubjectName", () => {
@@ -171,5 +173,105 @@ describe("Link Integrity — Integration Scenarios", () => {
     const llmText = "Go for a 15-minute walk and clear your head";
     const poolText = "Go for a 15-minute walk without your phone";
     expect(validateLinkTextConsistency(llmText, poolText)).toBe(true);
+  });
+});
+
+describe("isValidSuggestionUrl", () => {
+  it("returns true for valid YouTube URL", () => {
+    expect(isValidSuggestionUrl("https://youtube.com/@MrBeast")).toBe(true);
+  });
+
+  it("returns true for valid Twitch URL", () => {
+    expect(isValidSuggestionUrl("https://twitch.tv/gothamchess")).toBe(true);
+  });
+
+  it("returns true for valid TikTok URL", () => {
+    expect(isValidSuggestionUrl("https://tiktok.com/@khaby.lame")).toBe(true);
+  });
+
+  it("returns true for http:// URLs", () => {
+    expect(isValidSuggestionUrl("http://chess.com/puzzles")).toBe(true);
+  });
+
+  it("returns false for empty string", () => {
+    expect(isValidSuggestionUrl("")).toBe(false);
+  });
+
+  it("returns false for null", () => {
+    expect(isValidSuggestionUrl(null)).toBe(false);
+  });
+
+  it("returns false for undefined", () => {
+    expect(isValidSuggestionUrl(undefined)).toBe(false);
+  });
+
+  it("returns false for whitespace-only string", () => {
+    expect(isValidSuggestionUrl("   ")).toBe(false);
+  });
+
+  it("returns false for localhost URL", () => {
+    expect(isValidSuggestionUrl("http://localhost:3000")).toBe(false);
+  });
+
+  it("returns false for localhost https URL", () => {
+    expect(isValidSuggestionUrl("https://localhost:3000/some/path")).toBe(false);
+  });
+
+  it("returns false for 127.0.0.1 URL", () => {
+    expect(isValidSuggestionUrl("http://127.0.0.1:8080")).toBe(false);
+  });
+
+  it("returns false for relative path", () => {
+    expect(isValidSuggestionUrl("/api/baf")).toBe(false);
+  });
+
+  it("returns false for plain text (no protocol)", () => {
+    expect(isValidSuggestionUrl("youtube.com/@MrBeast")).toBe(false);
+  });
+
+  it("returns false for domain without TLD", () => {
+    expect(isValidSuggestionUrl("http://localhost")).toBe(false);
+  });
+
+  it("returns false for 0.0.0.0", () => {
+    expect(isValidSuggestionUrl("http://0.0.0.0:3000")).toBe(false);
+  });
+
+  it("returns true for URL with path and query params", () => {
+    expect(isValidSuggestionUrl("https://youtube.com/watch?v=abc123")).toBe(true);
+  });
+});
+
+describe("sanitizeLink", () => {
+  it("returns the URL for valid external links", () => {
+    expect(sanitizeLink("https://youtube.com/@MrBeast")).toBe("https://youtube.com/@MrBeast");
+  });
+
+  it("returns null for empty string", () => {
+    expect(sanitizeLink("")).toBeNull();
+  });
+
+  it("returns null for null", () => {
+    expect(sanitizeLink(null)).toBeNull();
+  });
+
+  it("returns null for undefined", () => {
+    expect(sanitizeLink(undefined)).toBeNull();
+  });
+
+  it("returns null for localhost URL", () => {
+    expect(sanitizeLink("http://localhost:3000")).toBeNull();
+  });
+
+  it("returns null for relative path", () => {
+    expect(sanitizeLink("/some/path")).toBeNull();
+  });
+
+  it("trims whitespace from valid URLs", () => {
+    expect(sanitizeLink("  https://twitch.tv/gothamchess  ")).toBe("https://twitch.tv/gothamchess");
+  });
+
+  it("returns null for whitespace-only string", () => {
+    expect(sanitizeLink("   ")).toBeNull();
   });
 });
