@@ -329,6 +329,7 @@ CRITICAL RULES:
 6. Do NOT write generic descriptions — use REAL creator names only
 7. Max 3 general activity suggestions (no URL), the rest MUST be real verified creators
 8. Include "followers_approx" — your best estimate of their follower/subscriber count
+9. FORBIDDEN PLATFORMS: NEVER suggest Instagram, Facebook, or any Meta platforms. Only use: youtube|twitch|tiktok|chess|general
 
 Return ONLY a JSON array: [{"text": "CreatorName — what they do (under 60 chars)", "platform": "youtube|twitch|tiktok|chess|general", "url": "https://exact-handle-url", "category": "influencer|gaming|creative|physical|learning|music|adventure|general", "followers_approx": 500000}]`,
         },
@@ -347,6 +348,11 @@ Return ONLY a JSON array: [{"text": "CreatorName — what they do (under 60 char
     const valid = parsed
       .filter((s) => {
         if (!s.text || !s.platform || !s.category) return false;
+        // Filter out Instagram URLs
+        if (s.url && s.url.toLowerCase().includes('instagram.com')) {
+          console.log(`[BAF][OnboardingSeed] Filtered Instagram URL: "${s.text.slice(0, 40)}..."`);
+          return false;
+        }
         // General activities (no URL) don't need follower check
         if (s.platform === "general") return true;
         // Require followers_approx for platform-specific entries
@@ -464,6 +470,14 @@ async function validatePoolEntries(
   // Build sets of valid entries
   const blockedIndices = new Set<number>();
 
+  // Filter out Instagram URLs first
+  entries.forEach((s, i) => {
+    if (s.url && s.url.toLowerCase().includes('instagram.com')) {
+      console.log(`[BAF][${logPrefix}] Instagram URL not allowed: "${s.url}" - filtered`);
+      blockedIndices.add(i);
+    }
+  });
+
   // Check YouTube channels
   for (const { handle, index } of ytHandles) {
     const stats = ytStats.get(handle.toLowerCase());
@@ -545,7 +559,8 @@ Rules:
 - Use their EXACT known handle/username for the URL
 - Same niche/vibe/country as the original
 - Include "followers_approx" — your best estimate of their follower count
-- If unsure about a creator's handle, skip them — do NOT guess`,
+- If unsure about a creator's handle, skip them — do NOT guess
+- FORBIDDEN: Never suggest Instagram, Facebook, or any Meta platforms`,
         },
       ],
     });
@@ -562,6 +577,11 @@ Rules:
     return parsed
       .filter((s) => {
         if (!s.text || !s.platform || !s.url || !s.category) return false;
+        // Filter out Instagram URLs
+        if (s.url && s.url.toLowerCase().includes('instagram.com')) {
+          console.log(`[BAF][PoolExpansion] Filtered Instagram URL: "${s.text.slice(0, 40)}..."`);
+          return false;
+        }
         // Require followers_approx for all platform-specific entries
         if (s.followers_approx === undefined || s.followers_approx < MIN_FOLLOWERS) {
           console.log(`[BAF][PoolExpansion] Filtered low/missing followers: "${s.text.slice(0, 40)}..." (${s.followers_approx ?? "unknown"})`);
@@ -709,6 +729,7 @@ Generate exactly 3 ALTERNATIVE suggestions that address their rejection reason. 
 
 ONLY suggest creators you are CONFIDENT are real and popular (100K+ followers). Use their EXACT known handle for URLs.
 URL formats: YouTube: https://youtube.com/@ExactHandle, Twitch: https://twitch.tv/exacthandle, TikTok: https://tiktok.com/@exacthandle, General activities: empty url
+FORBIDDEN: Never suggest Instagram, Facebook, or any Meta platforms.
 
 Return JSON array: [{"text": "CreatorName — description under 60 chars", "platform": "youtube|twitch|tiktok|chess|general", "url": "exact_handle_url_or_empty", "category": "influencer|gaming|creative|physical|learning|music|adventure|general", "followers_approx": 500000}]`,
         },
@@ -726,6 +747,11 @@ Return JSON array: [{"text": "CreatorName — description under 60 chars", "plat
     const valid = parsed
       .filter((s) => {
         if (!s.text || !s.platform || !s.category) return false;
+        // Filter out Instagram URLs
+        if (s.url && s.url.toLowerCase().includes('instagram.com')) {
+          console.log(`[BAF][RejectExpansion] Filtered Instagram URL: "${s.text.slice(0, 40)}..."`);
+          return false;
+        }
         if (s.platform === "general") return true;
         // Require followers_approx for all platform-specific entries
         if (s.followers_approx === undefined || s.followers_approx < MIN_FOLLOWERS) {
